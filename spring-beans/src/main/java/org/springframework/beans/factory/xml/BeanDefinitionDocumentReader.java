@@ -37,12 +37,39 @@ import org.springframework.beans.factory.BeanDefinitionStoreException;
 public interface BeanDefinitionDocumentReader {
 
 	/**
-	 * Read bean definitions from the given DOM document and
-	 * register them with the registry in the given reader context.
-	 * @param doc the DOM document
-	 * @param readerContext the current context of the reader
-	 * (includes the target registry and the resource being parsed)
-	 * @throws BeanDefinitionStoreException in case of parsing errors
+	 * 从给定的 DOM 文档中读取 Bean 定义，并使用给定的读取器上下文将它们注册到注册表中。
+	 *
+	 * 这是 BeanDefinitionDocumentReader 接口的核心方法，定义了如何解析 XML 文档
+	 * 并将其中的 Bean 定义注册到 Spring 容器中的规范。
+	 *
+	 * 实现类（如 DefaultBeanDefinitionDocumentReader）会：
+	 * 1. 获取 DOM 文档的根元素（通常是 <beans>）
+	 * 2. 解析根元素上的默认属性（如 default-lazy-init、default-autowire 等）
+	 * 3. 遍历根元素的所有子元素
+	 * 4. 对每个子元素进行解析：
+	 *    - <import>：递归加载其他配置文件
+	 *    - <alias>：为 Bean 注册别名
+	 *    - <bean>：解析并注册 Bean 定义
+	 *    - 自定义标签：委托给对应的 NamespaceHandler 处理
+	 * 5. 处理嵌套的 <beans> 标签（支持配置分组）
+	 * 6. 将解析过程中遇到的问题报告给 readerContext 中的问题报告器
+	 *
+	 * @param doc DOM 文档对象，由 XML 解析器生成
+	 *            - 根元素通常是 <beans>
+	 *            - 可能包含多个命名空间（如 context、aop、tx 等）
+	 *            - 支持嵌套的 <beans> 标签
+	 * @param readerContext 读取器当前上下文对象，包含：
+	 *                      - registry：Bean 定义注册表（BeanFactory）
+	 *                      - resource：正在解析的资源（用于错误定位）
+	 *                      - problemReporter：问题报告器（记录警告和错误）
+	 *                      - eventListener：事件监听器（发布解析事件）
+	 *                      - sourceExtractor：源码提取器（提取位置信息）
+	 *                      - namespaceHandlerResolver：命名空间处理器解析器
+	 * @throws BeanDefinitionStoreException 如果解析过程中发生错误
+	 *                                      - XML 结构错误
+	 *                                      - Bean 定义格式错误
+	 *                                      - 必需的属性缺失
+	 *                                      - Bean 定义重复且不允许覆盖
 	 */
 	void registerBeanDefinitions(Document doc, XmlReaderContext readerContext)
 			throws BeanDefinitionStoreException;

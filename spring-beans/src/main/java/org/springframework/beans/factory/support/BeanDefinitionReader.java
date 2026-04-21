@@ -83,10 +83,34 @@ public interface BeanDefinitionReader {
 
 
 	/**
-	 * Load bean definitions from the specified resource.
-	 * @param resource the resource descriptor
-	 * @return the number of bean definitions found
-	 * @throws BeanDefinitionStoreException in case of loading or parsing errors
+	 * 从指定的资源中加载 Bean 定义。
+	 *
+	 * 这是 XmlBeanDefinitionReader 的核心方法之一，负责解析单个 XML 资源文件，
+	 * 并将其中的所有 <bean> 定义转换为 Spring 内部的 BeanDefinition 对象，
+	 * 然后注册到 BeanFactory 中。
+	 *
+	 * 执行流程概要：
+	 * 1. 将 Resource 包装为 EncodedResource（支持字符编码配置）
+	 * 2. 获取 XML 输入流并创建 InputSource
+	 * 3. 解析 XML 文档（进行 DTD/XSD 验证）
+	 * 4. 遍历 Document 对象，提取每个 <bean> 标签
+	 * 5. 为每个 <bean> 创建 BeanDefinition 对象
+	 * 6. 将 BeanDefinition 注册到 BeanFactory
+	 * 7. 返回成功加载的 Bean 定义数量
+	 *
+	 * @param resource 资源描述符，封装了 XML 配置文件的位置和访问方式
+	 *                 - ClassPathResource：类路径下的文件
+	 *                 - FileSystemResource：文件系统中的文件
+	 *                 - UrlResource：URL 指向的资源
+	 *                 - ByteArrayResource：内存中的字节数组
+	 * @return 在该资源文件中找到并成功注册的 Bean 定义数量
+	 *         （即 XML 文件中 &lt;bean&gt; 标签的个数）
+	 * @throws BeanDefinitionStoreException 如果加载或解析过程中发生错误
+	 *         - 文件不存在（FileNotFoundException）
+	 *         - XML 格式错误（SAXParseException）
+	 *         - Bean 定义重复（已存在且不允许覆盖）
+	 *         - 字符编码问题（UnsupportedEncodingException）
+	 *         - I/O 异常（IOException）
 	 */
 	int loadBeanDefinitions(Resource resource) throws BeanDefinitionStoreException;
 

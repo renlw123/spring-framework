@@ -73,25 +73,78 @@ public abstract class AbstractXmlApplicationContext extends AbstractRefreshableC
 
 
 	/**
-	 * Loads the bean definitions via an XmlBeanDefinitionReader.
+	 * 通过 XmlBeanDefinitionReader 加载 Bean 定义。
+	 *
+	 * 这是 AbstractXmlApplicationContext 中的实现，
+	 * ClassPathXmlApplicationContext 通过继承链使用此方法。
+	 *
+	 * 核心流程：
+	 * 1. 创建 XmlBeanDefinitionReader（XML Bean 定义读取器）
+	 * 2. 配置读取器的环境、资源加载器、实体解析器
+	 * 3. 初始化读取器（子类扩展点）
+	 * 4. 执行实际的 Bean 定义加载
+	 *
 	 * @see org.springframework.beans.factory.xml.XmlBeanDefinitionReader
 	 * @see #initBeanDefinitionReader
-	 * @see #loadBeanDefinitions
+	 * @see #loadBeanDefinitions(org.springframework.beans.factory.xml.XmlBeanDefinitionReader)
 	 */
 	@Override
 	protected void loadBeanDefinitions(DefaultListableBeanFactory beanFactory) throws BeansException, IOException {
-		// Create a new XmlBeanDefinitionReader for the given BeanFactory.
+		// ============ 步骤1：创建 XML Bean 定义读取器 ============
+		// XmlBeanDefinitionReader 是专门用于解析 XML 配置文件的读取器
+		// 它负责：
+		//   - 读取 XML 配置文件（支持多种资源：类路径、文件系统、URL 等）
+		//   - 解析 <beans>、<bean>、<import>、<alias> 等标签
+		//   - 将 XML 中的每个 <bean> 元素转换为 BeanDefinition 对象
+		//   - 将 BeanDefinition 注册到 BeanFactory 中
 		XmlBeanDefinitionReader beanDefinitionReader = new XmlBeanDefinitionReader(beanFactory);
 
-		// Configure the bean definition reader with this context's
-		// resource loading environment.
+		// ============ 步骤2：配置 Bean 定义读取器 ============
+
+		// 2.1 设置环境（Environment）
+		// Environment 包含了：
+		//   - profiles（激活的配置文件，如 dev、prod）
+		//   - properties（系统属性、环境变量、自定义属性源）
+		// 这样在解析 XML 时可以根据环境决定是否加载某些 Bean
 		beanDefinitionReader.setEnvironment(getEnvironment());
+
+		// 2.2 设置资源加载器（ResourceLoader）
+		// 将当前 ApplicationContext 自身作为资源加载器
+		// 因为 ApplicationContext 实现了 ResourceLoader 接口
+		// 支持以下资源路径格式：
+		//   - 类路径：classpath:applicationContext.xml
+		//   - 文件系统：file:/path/to/config.xml
+		//   - URL：http://example.com/config.xml
 		beanDefinitionReader.setResourceLoader(this);
+
+		// 2.3 设置实体解析器（EntityResolver）
+		// ResourceEntityResolver 用于解析 XML 中的 DTD 和 Schema 声明
+		// 例如：<!DOCTYPE beans PUBLIC "-//SPRING//DTD BEAN 2.0//EN" "http://www.springframework.org/dtd/spring-beans-2.0.dtd">
+		//
+		// 作用：优先从类路径下查找 spring.schemas 和 spring.tlds 文件
+		// 避免在解析 XML 时去外网下载 DTD/Schema 文件，提高解析效率
+		// 同时也支持离线解析（不需要网络连接）
 		beanDefinitionReader.setEntityResolver(new ResourceEntityResolver(this));
 
-		// Allow a subclass to provide custom initialization of the reader,
-		// then proceed with actually loading the bean definitions.
+		// ============ 步骤3：初始化 Bean 定义读取器（模板方法）============
+		// 这是一个扩展点，允许子类对 XmlBeanDefinitionReader 进行自定义初始化
+		// 例如：
+		//   - 设置验证模式（DTD 还是 XSD）
+		//   - 设置是否允许 Bean 定义覆盖
+		//   - 设置是否忽略 XML 中的注释
+		// 默认实现为空方法
 		initBeanDefinitionReader(beanDefinitionReader);
+
+		// ============ 步骤4：执行实际的 Bean 定义加载 ============
+		// 这个方法会根据当前 ApplicationContext 的配置位置（configLocations）
+		// 加载所有 XML 配置文件，并注册所有 Bean 定义
+		//
+		// 加载过程：
+		//   1. 遍历 configLocations（配置文件路径数组）
+		//   2. 将每个路径解析为 Resource 对象
+		//   3. 对每个 Resource 调用 XmlBeanDefinitionReader 的 loadBeanDefinitions 方法
+		//   4. 解析 XML 文件，生成 BeanDefinition
+		//   5. 将 BeanDefinition 注册到 BeanFactory
 		loadBeanDefinitions(beanDefinitionReader);
 	}
 
@@ -109,26 +162,75 @@ public abstract class AbstractXmlApplicationContext extends AbstractRefreshableC
 	}
 
 	/**
-	 * Load the bean definitions with the given XmlBeanDefinitionReader.
-	 * <p>The lifecycle of the bean factory is handled by the {@link #refreshBeanFactory}
-	 * method; hence this method is just supposed to load and/or register bean definitions.
-	 * @param reader the XmlBeanDefinitionReader to use
-	 * @throws BeansException in case of bean registration errors
-	 * @throws IOException if the required XML document isn't found
-	 * @see #refreshBeanFactory
-	 * @see #getConfigLocations
-	 * @see #getResources
-	 * @see #getResourcePatternResolver
+	 * 使用给定的 XmlBeanDefinitionReader 加载 Bean 定义。
+	 *
+	 * 核心流程：
+	 * 1. 优先加载通过编程方式设置的 Resource 数组（直接配置的资源对象）
+	 * 2. 然后加载通过字符串路径指定的配置文件位置
+	 *
+	 * 设计说明：
+	 * - 这个方法只负责加载和注册 Bean 定义，不负责 BeanFactory 的生命周期管理
+	 * - BeanFactory 的生命周期（创建、销毁）由 refreshBeanFactory() 方法管理
+	 * - 支持两种配置来源：Resource 对象数组 和 配置文件路径字符串数组
+	 *
+	 * @param reader 已经配置好的 XmlBeanDefinitionReader（用于解析 XML 并注册 Bean 定义）
+	 * @throws BeansException 如果 Bean 定义注册过程中发生错误
+	 * @throws IOException 如果找不到指定的 XML 文档或读取失败
+	 * @see #refreshBeanFactory      // BeanFactory 的生命周期管理
+	 * @see #getConfigLocations      // 获取配置文件路径数组
+	 * @see #getResources            // 获取 Resource 资源数组（子类可覆盖）
+	 * @see #getResourcePatternResolver  // 获取资源模式解析器（支持通配符）
 	 */
 	protected void loadBeanDefinitions(XmlBeanDefinitionReader reader) throws BeansException, IOException {
+
+		// ============ 方式1：从 Resource 数组加载 Bean 定义 ============
+		// getConfigResources() 是一个模板方法，默认返回 null
+		// 子类可以覆盖这个方法，直接返回 Resource 对象数组
+		//
+		// 使用场景：
+		//   1. 编程式创建 ApplicationContext 时直接传入 Resource 对象
+		//   2. 需要从非标准位置（如数据库、网络）加载配置时
+		//   3. 需要对 Resource 进行预处理（解密、转换等）时
+		//
+		// 示例：
+		//   Resource[] resources = new Resource[] {
+		//       new ClassPathResource("beans1.xml"),
+		//       new FileSystemResource("/path/to/beans2.xml")
+		//   };
 		Resource[] configResources = getConfigResources();
 		if (configResources != null) {
+			// 批量加载多个 Resource 资源
+			// reader.loadBeanDefinitions() 会：
+			//   1. 遍历每个 Resource
+			//   2. 解析 XML 内容
+			//   3. 将 Bean 定义注册到 BeanFactory
+			//   4. 返回总共加载的 Bean 定义数量（返回值被忽略）
 			reader.loadBeanDefinitions(configResources);
 		}
+
+		// ============ 方式2：从配置文件路径数组加载 Bean 定义 ============
+		// getConfigLocations() 返回在构造函数中设置的配置文件路径
+		// 例如：new ClassPathXmlApplicationContext("beans.xml", "services.xml")
+		//
+		// 支持的路径格式：
+		//   - 类路径：    "classpath:applicationContext.xml"
+		//   - 文件系统：  "file:/home/config/beans.xml"
+		//   - 相对路径：  "beans.xml"（默认从类路径加载）
+		//   - 通配符：    "classpath*:config/**/*.xml"（匹配多个文件）
+		//   - URL：       "http://example.com/config.xml"
 		String[] configLocations = getConfigLocations();
 		if (configLocations != null) {
+			// 批量加载多个配置文件
+			// reader.loadBeanDefinitions() 内部会：
+			//   1. 将每个路径字符串解析为 Resource 对象
+			//   2. 支持 Ant 风格的通配符（如 "classpath*:config/**/*.xml"）
+			//   3. 解析每个 XML 文件并注册 Bean 定义
 			reader.loadBeanDefinitions(configLocations);
 		}
+
+		// 注意：两种方式可以同时使用！
+		// 如果同时设置了 configResources 和 configLocations，
+		// 那么两者都会被加载，且 configResources 优先加载
 	}
 
 	/**

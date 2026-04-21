@@ -141,6 +141,10 @@ public class ClassPathXmlApplicationContext extends AbstractXmlApplicationContex
 		super(parent);
 		setConfigLocations(configLocations);
 		if (refresh) {
+			// 调用本类的另一个构造函数，该函数接受：
+			// 1. 配置文件位置数组（将单个字符串包装为数组）
+			// 2. refresh 标志为 true（表示立即加载/刷新容器，解析配置并实例化 Bean）
+			// 3. 父应用上下文为 null（表示没有父容器）
 			refresh();
 		}
 	}

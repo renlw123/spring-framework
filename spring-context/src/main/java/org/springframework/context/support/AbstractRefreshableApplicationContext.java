@@ -113,26 +113,81 @@ public abstract class AbstractRefreshableApplicationContext extends AbstractAppl
 
 
 	/**
-	 * This implementation performs an actual refresh of this context's underlying
-	 * bean factory, shutting down the previous bean factory (if any) and
-	 * initializing a fresh bean factory for the next phase of the context's lifecycle.
+	 * 此方法执行对当前上下文底层 BeanFactory 的实际刷新操作。
+	 *
+	 * 核心流程：
+	 * 1. 如果已存在 BeanFactory，则销毁所有单例 Bean 并关闭旧的 BeanFactory
+	 * 2. 创建一个全新的 DefaultListableBeanFactory 实例
+	 * 3. 进行自定义配置（如是否允许循环依赖、是否允许 Bean 定义覆盖）
+	 * 4. 加载 Bean 定义（从 XML、注解等配置源读取并注册）
+	 * 5. 将新创建的 BeanFactory 赋值给当前上下文
+	 *
+	 * 这是 AbstractRefreshableApplicationContext 中的实现，
+	 * ClassPathXmlApplicationContext 通过继承链使用此实现。
+	 *
+	 * @throws BeansException 如果 BeanFactory 创建失败或 Bean 定义加载失败
 	 */
 	@Override
 	protected final void refreshBeanFactory() throws BeansException {
+		// ============ 阶段1：清理旧的 BeanFactory（如果存在）============
 		if (hasBeanFactory()) {
+			// 1.1 销毁所有单例 Bean
+			// 这个方法会：
+			//   - 调用所有 DisposableBean 的 destroy() 方法
+			//   - 执行自定义的 destroy-method
+			//   - 清除单例缓存
 			destroyBeans();
+
+			// 1.2 关闭 BeanFactory
+			// 这个方法会：
+			//   - 将内部 beanFactory 引用设为 null
+			//   - 清除序列化 ID
 			closeBeanFactory();
 		}
+
+		// ============ 阶段2：创建全新的 BeanFactory ============
 		try {
+			// 2.1 创建 DefaultListableBeanFactory
+			// DefaultListableBeanFactory 是 Spring 中最核心的 BeanFactory 实现
+			// 它支持：单例/原型、BeanPostProcessor、BeanFactoryPostProcessor、
+			// 别名、依赖注入、循环依赖处理等全部功能
 			DefaultListableBeanFactory beanFactory = createBeanFactory();
+
+			// 2.2 设置序列化 ID
+			// 用于在反序列化时恢复 BeanFactory 的状态
 			beanFactory.setSerializationId(getId());
+
+			// 2.3 设置应用启动监控（用于性能诊断）
 			beanFactory.setApplicationStartup(getApplicationStartup());
+
+			// 2.4 自定义 BeanFactory（模板方法，供子类扩展）
+			// 典型的自定义包括：
+			//   - setAllowBeanDefinitionOverriding()：是否允许 Bean 定义覆盖
+			//   - setAllowCircularReferences()：是否允许循环依赖
 			customizeBeanFactory(beanFactory);
+
+			// 2.5 加载 Bean 定义（核心方法）
+			// 对于 ClassPathXmlApplicationContext，这个方法会：
+			//   - 解析类路径下的 XML 配置文件
+			//   - 使用 XmlBeanDefinitionReader 读取 <bean> 标签
+			//   - 将每个 <bean> 转换为 BeanDefinition 对象
+			//   - 注册到 beanFactory 中
+			//
+			// 对于其他子类（如 AnnotationConfigApplicationContext）：
+			//   - 会扫描带有 @Component、@Service 等注解的类
+			//   - 通过 AnnotatedBeanDefinitionReader 注册 Bean 定义
 			loadBeanDefinitions(beanFactory);
+
+			// 2.6 将新创建的 BeanFactory 赋值给当前上下文的成员变量
+			// 这样后续操作（如 getBean()）就可以使用这个新的 BeanFactory
 			this.beanFactory = beanFactory;
 		}
 		catch (IOException ex) {
-			throw new ApplicationContextException("I/O error parsing bean definition source for " + getDisplayName(), ex);
+			// 加载配置资源时发生 I/O 错误（如文件不存在、格式错误等）
+			throw new ApplicationContextException(
+					"I/O error parsing bean definition source for " + getDisplayName(),
+					ex
+			);
 		}
 	}
 

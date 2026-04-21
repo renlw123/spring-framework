@@ -150,23 +150,79 @@ public abstract class BeanDefinitionReaderUtils {
 	}
 
 	/**
-	 * Register the given bean definition with the given bean factory.
-	 * @param definitionHolder the bean definition including name and aliases
-	 * @param registry the bean factory to register with
-	 * @throws BeanDefinitionStoreException if registration failed
+	 * 使用给定的 Bean 工厂注册给定的 Bean 定义。
+	 *
+	 * 这个方法负责将解析完成的 BeanDefinition 注册到 BeanFactory 中，
+	 * 同时处理 Bean 的别名注册。
+	 *
+	 * 核心流程：
+	 * 1. 获取 Bean 的主名称
+	 * 2. 将 BeanDefinition 注册到注册表（使用主名称）
+	 * 3. 遍历并注册所有别名（如果存在）
+	 *
+	 * @param definitionHolder Bean 定义持有者，包含：
+	 *                         - beanDefinition：Bean 的元数据定义
+	 *                         - beanName：Bean 的主名称（通常是 id 属性或生成的名称）
+	 *                         - aliases：Bean 的别名数组（来自 name 属性）
+	 * @param registry Bean 定义注册表，通常是 DefaultListableBeanFactory 实例
+	 * @throws BeanDefinitionStoreException 如果注册失败
+	 *         - Bean 名称重复且不允许覆盖
+	 *         - Bean 定义格式错误
+	 *         - 循环别名（A 是 B 的别名，B 又是 A 的别名）
 	 */
 	public static void registerBeanDefinition(
 			BeanDefinitionHolder definitionHolder, BeanDefinitionRegistry registry)
 			throws BeanDefinitionStoreException {
 
-		// Register bean definition under primary name.
+		// ============ 步骤1：获取 Bean 的主名称 ============
+		// beanName 来源优先级：
+		//   1. id 属性（如果明确指定）
+		//   2. name 属性中的第一个名称（如果指定了多个）
+		//   3. 自动生成的名称（如 "com.example.UserService#0"）
+		//
+		// 示例：
+		//   <bean id="userService" name="service,svc" class="..."/>
+		//   → beanName = "userService"
+		//   → aliases = ["service", "svc"]
 		String beanName = definitionHolder.getBeanName();
+
+		// ============ 步骤2：注册主 Bean 定义 ============
+		// registry.registerBeanDefinition() 内部会做：
+		//   1. 检查是否已存在同名的 BeanDefinition
+		//   2. 如果存在且不允许覆盖（allowBeanDefinitionOverriding = false），抛出异常
+		//   3. 如果存在且允许覆盖，则替换旧的 BeanDefinition
+		//   4. 将 BeanDefinition 存入 beanDefinitionMap（ConcurrentHashMap）
+		//   5. 将 beanName 添加到 beanDefinitionNames（List）中
+		//   6. 清除相关的缓存（如 mergedBeanDefinition 缓存）
+		//   7. 重置手动注册的单例标记
+		//
+		// 注意：此时只是注册了 Bean 的定义（元数据），
+		//       Bean 的实例化还没有发生！
+		//       真正的实例化在 finishBeanFactoryInitialization() 阶段
 		registry.registerBeanDefinition(beanName, definitionHolder.getBeanDefinition());
 
-		// Register aliases for bean name, if any.
+		// ============ 步骤3：注册别名 ============
+		// 别名的作用：
+		//   1. 可以通过多个名称获取同一个 Bean
+		//   2. 便于在不同模块中使用不同的命名约定
+		//   3. 兼容旧代码中的 Bean 名称
+		//   4. 实现配置的灵活性
+		//
+		// 别名注册规则：
+		//   - 一个别名只能指向一个 Bean（不能重复映射）
+		//   - 一个 Bean 可以有多个别名
+		//   - 别名不能与现有的 Bean 名称重复（有优先顺序）
+		//   - 不能形成循环别名（A→B, B→A）
+		//   - 别名注册不会触发 Bean 实例化
 		String[] aliases = definitionHolder.getAliases();
 		if (aliases != null) {
+			// 遍历所有别名，逐个注册
 			for (String alias : aliases) {
+				// registry.registerAlias() 内部会做：
+				//   1. 检查别名是否已被其他 Bean 使用
+				//   2. 检查是否形成循环别名
+				//   3. 将 alias → beanName 的映射存入 aliasMap（ConcurrentHashMap）
+				//   4. 如果别名已被使用且不允许覆盖，抛出异常
 				registry.registerAlias(beanName, alias);
 			}
 		}

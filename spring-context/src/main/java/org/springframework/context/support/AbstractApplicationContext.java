@@ -550,69 +550,122 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 		return this.applicationListeners;
 	}
 
+	/**
+	 * Spring IoC 容器的核心方法，负责容器的初始化、刷新和启动。
+	 * 整个 Spring 应用上下文的启动过程都在这一个方法中完成。
+	 * 该方法使用了同步锁，确保容器刷新过程的线程安全。
+	 *
+	 * @throws BeansException 如果 Bean 的创建或配置过程中出现错误
+	 * @throws IllegalStateException 如果容器已经处于非法状态（如已经关闭）
+	 */
 	@Override
 	public void refresh() throws BeansException, IllegalStateException {
+		// 使用同步监视器对象加锁，保证刷新过程的原子性
+		// 防止在多线程环境下同时刷新或关闭同一个容器
 		synchronized (this.startupShutdownMonitor) {
+
+			// ============ 步骤1：创建启动步骤记录（用于性能监控和诊断）============
 			StartupStep contextRefresh = this.applicationStartup.start("spring.context.refresh");
 
-			// Prepare this context for refreshing.
+			// ============ 步骤2：刷新前的准备工作 ============
+			// 1. 设置容器启动时间
+			// 2. 设置容器为激活状态
+			// 3. 初始化属性源（PropertySources）
+			// 4. 验证必要属性是否存在
 			prepareRefresh();
 
-			// Tell the subclass to refresh the internal bean factory.
+			// ============ 步骤3：获取或创建 BeanFactory ============
+			// 对于 ClassPathXmlApplicationContext，这里会：
+			// 1. 销毁旧的 BeanFactory（如果存在）
+			// 2. 创建新的 DefaultListableBeanFactory
+			// 3. 加载和解析 XML 配置文件，将 Bean 定义注册到 BeanFactory
 			ConfigurableListableBeanFactory beanFactory = obtainFreshBeanFactory();
 
-			// Prepare the bean factory for use in this context.
+			// ============ 步骤4：为 BeanFactory 进行准备工作 ============
+			// 1. 设置类加载器（ClassLoader）
+			// 2. 设置表达式解析器（SpEL 支持）
+			// 3. 添加 PropertyEditorRegistrar（属性编辑器注册器）
+			// 4. 添加 BeanPostProcessor（ApplicationContextAwareProcessor）
+			// 5. 忽略某些自动装配的依赖接口
+			// 6. 注册环境相关的单例 Bean（environment、systemProperties、systemEnvironment）
 			prepareBeanFactory(beanFactory);
 
 			try {
-				// Allows post-processing of the bean factory in context subclasses.
+				// ============ 步骤5：BeanFactory 的后置处理（子类可覆盖）============
+				// 允许子类在 Bean 实例化前对 BeanFactory 进行额外设置
+				// 例如：WebApplicationContext 会添加 Servlet 相关的依赖
 				postProcessBeanFactory(beanFactory);
 
+				// ============ 步骤6：调用 BeanFactoryPostProcessor ============
 				StartupStep beanPostProcess = this.applicationStartup.start("spring.context.beans.post-process");
-				// Invoke factory processors registered as beans in the context.
+
+				// 6.1 调用所有 BeanFactoryPostProcessor
+				// 这些处理器可以在 Bean 实例化之前修改 Bean 的定义信息
+				// 例如：PropertyPlaceholderConfigurer 会替换 ${...} 占位符
 				invokeBeanFactoryPostProcessors(beanFactory);
-				// Register bean processors that intercept bean creation.
+
+				// 6.2 注册 BeanPostProcessor
+				// BeanPostProcessor 会在 Bean 实例化前后进行拦截处理
+				// 注意：这里只是注册，真正的执行在 Bean 创建时
 				registerBeanPostProcessors(beanFactory);
 				beanPostProcess.end();
 
-				// Initialize message source for this context.
+				// ============ 步骤7：初始化消息源（国际化支持）============
+				// 注册 MessageSource Bean，用于处理国际化消息
+				// 如果没有定义，则使用默认的 DelegatingMessageSource
 				initMessageSource();
 
-				// Initialize event multicaster for this context.
+				// ============ 步骤8：初始化事件广播器 ============
+				// 注册 ApplicationEventMulticaster Bean，用于管理事件监听器
+				// 如果没有定义，则使用默认的 SimpleApplicationEventMulticaster
 				initApplicationEventMulticaster();
 
-				// Initialize other special beans in specific context subclasses.
+				// ============ 步骤9：刷新时的特殊初始化（模板方法）============
+				// 这是一个模板方法，留给子类扩展
+				// 例如：WebApplicationContext 会在这里初始化 ThemeSource
 				onRefresh();
 
-				// Check for listener beans and register them.
+				// ============ 步骤10：注册事件监听器 ============
+				// 找出所有实现了 ApplicationListener 接口的 Bean
+				// 将它们注册到事件广播器上
 				registerListeners();
 
-				// Instantiate all remaining (non-lazy-init) singletons.
+				// ============ 步骤11：实例化所有非懒加载的单例 Bean ============
+				// 这是 Spring 启动的核心步骤：
+				// 1. 实例化所有非懒加载的单例 Bean
+				// 2. 执行依赖注入（属性填充）
+				// 3. 执行 Bean 的初始化回调（@PostConstruct、InitializingBean、init-method）
+				// 4. 注册可销毁的 Bean（用于容器关闭时的清理）
 				finishBeanFactoryInitialization(beanFactory);
 
-				// Last step: publish corresponding event.
+				// ============ 步骤12：完成刷新，发布相应事件 ============
+				// 1. 清除上下文资源缓存（如 ResourceLoader 的缓存）
+				// 2. 初始化 LifecycleProcessor（生命周期处理器）
+				// 3. 调用所有 Lifecycle 组件的 start() 方法
+				// 4. 发布 ContextRefreshedEvent 事件
 				finishRefresh();
 			}
-
 			catch (BeansException ex) {
+				// ============ 异常处理：刷新失败 ============
 				if (logger.isWarnEnabled()) {
 					logger.warn("Exception encountered during context initialization - " +
 							"cancelling refresh attempt: " + ex);
 				}
 
-				// Destroy already created singletons to avoid dangling resources.
+				// 销毁已经创建的单例 Bean，避免资源泄漏
 				destroyBeans();
 
-				// Reset 'active' flag.
+				// 重置容器的激活标志位
 				cancelRefresh(ex);
 
-				// Propagate exception to caller.
+				// 向上抛出异常
 				throw ex;
 			}
-
 			finally {
-				// Reset common introspection caches in Spring's core, since we
-				// might not ever need metadata for singleton beans anymore...
+				// ============ 最终清理：重置缓存 ============
+				// 重置 Spring 核心中的公共内省缓存
+				// 例如：反射缓存、注解缓存、泛型类型缓存等
+				// 这样做是因为单例 Bean 可能不再需要这些元数据了
 				resetCommonCaches();
 				contextRefresh.end();
 			}
@@ -670,13 +723,27 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 	/**
-	 * Tell the subclass to refresh the internal bean factory.
-	 * @return the fresh BeanFactory instance
-	 * @see #refreshBeanFactory()
-	 * @see #getBeanFactory()
+	 * 告诉子类刷新内部的 Bean 工厂。
+	 * 这是一个模板方法，实际刷新操作委托给子类实现。
+	 *
+	 * 执行流程：
+	 * 1. 调用 refreshBeanFactory() 刷新或重新创建 BeanFactory
+	 * 2. 返回刷新后的 BeanFactory 实例
+	 *
+	 * @return 刷新后的 BeanFactory 实例（ConfigurableListableBeanFactory 类型）
+	 * @see #refreshBeanFactory()      // 由子类实现的实际刷新逻辑
+	 * @see #getBeanFactory()          // 由子类实现的获取 BeanFactory 的方法
 	 */
 	protected ConfigurableListableBeanFactory obtainFreshBeanFactory() {
+		// 步骤1：刷新 BeanFactory
+		// 对于 AbstractRefreshableApplicationContext（ClassPathXmlApplicationContext 的父类）：
+		//   - 如果已有 BeanFactory，则先销毁所有单例 Bean，再关闭旧的 BeanFactory
+		//   - 创建一个新的 DefaultListableBeanFactory 实例
+		//   - 加载并解析 XML 配置文件，将 Bean 定义注册到新的 BeanFactory 中
 		refreshBeanFactory();
+
+		// 步骤2：返回刷新后的 BeanFactory
+		// getBeanFactory() 返回刚刚创建好的 BeanFactory 实例
 		return getBeanFactory();
 	}
 

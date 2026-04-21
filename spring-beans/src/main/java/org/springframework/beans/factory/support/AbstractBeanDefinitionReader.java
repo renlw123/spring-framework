@@ -188,13 +188,47 @@ public abstract class AbstractBeanDefinitionReader implements BeanDefinitionRead
 	}
 
 
+	/**
+	 * 从多个 Resource 资源中加载 Bean 定义。
+	 *
+	 * 这是 XmlBeanDefinitionReader 中的方法实现。
+	 *
+	 * 核心流程：
+	 * 1. 校验资源数组不为空
+	 * 2. 遍历每个 Resource 资源
+	 * 3. 逐个调用单资源加载方法
+	 * 4. 累加并返回总共加载的 Bean 定义数量
+	 *
+	 * @param resources 可变参数形式的 Resource 资源数组（支持传入0个或多个）
+	 * @return 本次加载的 Bean 定义总数（所有资源文件中 <bean> 标签的数量之和）
+	 * @throws BeanDefinitionStoreException 如果 Bean 定义存储失败（如解析错误、格式错误等）
+	 */
 	@Override
 	public int loadBeanDefinitions(Resource... resources) throws BeanDefinitionStoreException {
+		// ============ 步骤1：参数校验 ============
+		// 确保传入的资源数组不为 null
+		// 如果传入 null，则抛出 IllegalArgumentException
+		// 注意：允许传入空数组（长度为0），此时不会加载任何 Bean 定义，返回0
 		Assert.notNull(resources, "Resource array must not be null");
-		int count = 0;
+
+		// ============ 步骤2：遍历并加载所有资源 ============
+		int count = 0;  // 累计加载的 Bean 定义数量
 		for (Resource resource : resources) {
+			// 调用单资源加载方法（核心逻辑）
+			// loadBeanDefinitions(Resource) 会：
+			//   1. 将 Resource 包装为 EncodedResource（处理字符编码）
+			//   2. 打开输入流读取 XML 内容
+			//   3. 解析 XML 文档（DTD/XSD 验证）
+			//   4. 遍历 XML 文档中的 <bean> 标签
+			//   5. 为每个 <bean> 创建 BeanDefinition 对象
+			//   6. 将 BeanDefinition 注册到 BeanFactory
+			//   7. 返回本次加载的 Bean 定义数量
 			count += loadBeanDefinitions(resource);
 		}
+
+		// ============ 步骤3：返回总数 ============
+		// 返回所有资源文件中 Bean 定义的总数
+		// 这个返回值通常用于日志记录或调试，实际业务代码很少使用
 		return count;
 	}
 
