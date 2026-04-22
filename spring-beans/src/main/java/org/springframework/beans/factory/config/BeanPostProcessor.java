@@ -58,21 +58,23 @@ import org.springframework.lang.Nullable;
 public interface BeanPostProcessor {
 
 	/**
-	 * Apply this {@code BeanPostProcessor} to the given new bean instance <i>before</i> any bean
-	 * initialization callbacks (like InitializingBean's {@code afterPropertiesSet}
-	 * or a custom init-method). The bean will already be populated with property values.
-	 * The returned bean instance may be a wrapper around the original.
-	 * <p>The default implementation returns the given {@code bean} as-is.
-	 * @param bean the new bean instance
-	 * @param beanName the name of the bean
-	 * @return the bean instance to use, either the original or a wrapped one;
-	 * if {@code null}, no subsequent BeanPostProcessors will be invoked
-	 * @throws org.springframework.beans.BeansException in case of errors
+	 * 在 bean 初始化回调（如 InitializingBean 的 afterPropertiesSet 或自定义 init-method）之前，
+	 * 将此 {@code BeanPostProcessor} 应用于给定的新 bean 实例。
+	 * 此时 bean 已经被填充了属性值。
+	 * 返回的 bean 实例可能是原始 bean 的包装器。
+	 *
+	 * <p>默认实现原样返回给定的 {@code bean}。
+	 *
+	 * @param bean 新的 bean 实例
+	 * @param beanName bean 的名称
+	 * @return 要使用的 bean 实例，可能是原始实例或包装后的实例；
+	 *         如果返回 {@code null}，则后续的 BeanPostProcessor 将不会被调用
+	 * @throws org.springframework.beans.BeansException 如果发生错误
 	 * @see org.springframework.beans.factory.InitializingBean#afterPropertiesSet
 	 */
 	@Nullable
 	default Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
-		return bean;
+		return bean;  // 默认实现：什么都不做，直接返回原 bean
 	}
 
 	/**

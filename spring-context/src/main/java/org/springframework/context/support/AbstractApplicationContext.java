@@ -965,37 +965,48 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 	/**
-	 * Finish the initialization of this context's bean factory,
-	 * initializing all remaining singleton beans.
+	 * 完成此上下文的 Bean 工厂的初始化，
+	 * 初始化所有剩余的单例 Bean。
 	 */
 	protected void finishBeanFactoryInitialization(ConfigurableListableBeanFactory beanFactory) {
-		// Initialize conversion service for this context.
+
+		// ============ 步骤1：初始化转换服务（ConversionService）============
+		// 如果 BeanFactory 中存在名为 "conversionService" 的 Bean，且类型匹配 ConversionService
+		// 则将其设置为 BeanFactory 的转换服务
+		// ConversionService 用于类型转换，如 String → Date、String → 自定义类型等
 		if (beanFactory.containsBean(CONVERSION_SERVICE_BEAN_NAME) &&
 				beanFactory.isTypeMatch(CONVERSION_SERVICE_BEAN_NAME, ConversionService.class)) {
 			beanFactory.setConversionService(
 					beanFactory.getBean(CONVERSION_SERVICE_BEAN_NAME, ConversionService.class));
 		}
 
-		// Register a default embedded value resolver if no BeanFactoryPostProcessor
-		// (such as a PropertySourcesPlaceholderConfigurer bean) registered any before:
-		// at this point, primarily for resolution in annotation attribute values.
+		// ============ 步骤2：注册默认的嵌入式值解析器 ============
+		// 如果没有 BeanFactoryPostProcessor（如 PropertySourcesPlaceholderConfigurer）注册过值解析器
+		// 则添加一个默认的，主要用于解析注解属性值中的占位符（如 ${xxx}）
 		if (!beanFactory.hasEmbeddedValueResolver()) {
 			beanFactory.addEmbeddedValueResolver(strVal -> getEnvironment().resolvePlaceholders(strVal));
 		}
 
-		// Initialize LoadTimeWeaverAware beans early to allow for registering their transformers early.
+		// ============ 步骤3：提前初始化 LoadTimeWeaverAware 类型的 Bean ============
+		// LoadTimeWeaver 用于类加载时的字节码增强（如 AOP 的织入）
+		// 提前初始化这些 Bean，以便尽早注册它们的转换器
 		String[] weaverAwareNames = beanFactory.getBeanNamesForType(LoadTimeWeaverAware.class, false, false);
 		for (String weaverAwareName : weaverAwareNames) {
 			getBean(weaverAwareName);
 		}
 
-		// Stop using the temporary ClassLoader for type matching.
+		// ============ 步骤4：清理临时类加载器 ============
+		// 停止使用临时 ClassLoader 进行类型匹配，后续使用正式的 ClassLoader
 		beanFactory.setTempClassLoader(null);
 
-		// Allow for caching all bean definition metadata, not expecting further changes.
+		// ============ 步骤5：冻结配置 ============
+		// 冻结所有 Bean 定义的元数据，标记它们不再被修改
+		// 冻结后，Bean 定义不能被修改或覆盖，可以提高后续操作的性能
 		beanFactory.freezeConfiguration();
 
-		// Instantiate all remaining (non-lazy-init) singletons.
+		// ============ 步骤6：实例化所有剩余的非懒加载单例 Bean ============
+		// 这是 Spring 启动的核心步骤！
+		// 会实例化所有尚未创建的非懒加载单例 Bean，执行依赖注入和初始化回调
 		beanFactory.preInstantiateSingletons();
 	}
 

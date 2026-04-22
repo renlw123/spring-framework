@@ -204,58 +204,74 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 	}
 
 	/**
-	 * Return the (raw) singleton object registered under the given name,
-	 * creating and registering a new one if none registered yet.
-	 * @param beanName the name of the bean
-	 * @param singletonFactory the ObjectFactory to lazily create the singleton
-	 * with, if necessary
-	 * @return the registered singleton object
+	 * 返回在给定名称下注册的（原始）单例对象，
+	 * 如果尚未注册，则创建并注册一个新的单例对象。
+	 *
+	 * @param beanName bean 的名称
+	 * @param singletonFactory 用于在需要时懒加载创建单例的 ObjectFactory
+	 * @return 注册的单例对象
 	 */
 	public Object getSingleton(String beanName, ObjectFactory<?> singletonFactory) {
 		Assert.notNull(beanName, "Bean name must not be null");
+
+		// 使用单例对象缓存作为锁，保证线程安全
 		synchronized (this.singletonObjects) {
+			// ============ 步骤1：再次检查缓存（双重检查锁模式）============
 			Object singletonObject = this.singletonObjects.get(beanName);
 			if (singletonObject == null) {
+
+				// ============ 步骤2：检查容器是否正在销毁 ============
 				if (this.singletonsCurrentlyInDestruction) {
 					throw new BeanCreationNotAllowedException(beanName,
 							"Singleton bean creation not allowed while singletons of this factory are in destruction " +
-							"(Do not request a bean from a BeanFactory in a destroy method implementation!)");
+									"(Do not request a bean from a BeanFactory in a destroy method implementation!)");
 				}
+
 				if (logger.isDebugEnabled()) {
 					logger.debug("Creating shared instance of singleton bean '" + beanName + "'");
 				}
+
+				// ============ 步骤3：创建前回调 ============
+				// 将 beanName 添加到 singletonsCurrentlyInCreation 集合中
+				// 标记这个单例正在创建中（用于检测循环依赖）
 				beforeSingletonCreation(beanName);
+
 				boolean newSingleton = false;
 				boolean recordSuppressedExceptions = (this.suppressedExceptions == null);
 				if (recordSuppressedExceptions) {
 					this.suppressedExceptions = new LinkedHashSet<>();
 				}
+
 				try {
+					// ============ 步骤4：调用工厂方法创建 bean ============
+					// 这里的 singletonFactory.getObject() 实际会调用 createBean()
 					singletonObject = singletonFactory.getObject();
 					newSingleton = true;
-				}
-				catch (IllegalStateException ex) {
-					// Has the singleton object implicitly appeared in the meantime ->
-					// if yes, proceed with it since the exception indicates that state.
+				} catch (IllegalStateException ex) {
+					// 并发情况：其他线程可能已经创建了该单例
+					// 再次从缓存中获取，如果存在则返回，否则抛出异常
 					singletonObject = this.singletonObjects.get(beanName);
 					if (singletonObject == null) {
 						throw ex;
 					}
-				}
-				catch (BeanCreationException ex) {
+				} catch (BeanCreationException ex) {
+					// 记录所有被抑制的异常，用于调试
 					if (recordSuppressedExceptions) {
 						for (Exception suppressedException : this.suppressedExceptions) {
 							ex.addRelatedCause(suppressedException);
 						}
 					}
 					throw ex;
-				}
-				finally {
+				} finally {
+					// ============ 步骤5：创建后回调 ============
+					// 从 singletonsCurrentlyInCreation 集合中移除 beanName
+					afterSingletonCreation(beanName);
 					if (recordSuppressedExceptions) {
 						this.suppressedExceptions = null;
 					}
-					afterSingletonCreation(beanName);
 				}
+
+				// ============ 步骤6：注册新创建的单例 ============
 				if (newSingleton) {
 					addSingleton(beanName, singletonObject);
 				}

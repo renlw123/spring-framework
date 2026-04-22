@@ -82,15 +82,17 @@ public class AnnotationConfigApplicationContext extends GenericApplicationContex
 	}
 
 	/**
-	 * Create a new AnnotationConfigApplicationContext, deriving bean definitions
-	 * from the given component classes and automatically refreshing the context.
-	 * @param componentClasses one or more component classes &mdash; for example,
-	 * {@link Configuration @Configuration} classes
+	 * 创建一个新的 AnnotationConfigApplicationContext，
+	 * 从给定的组件类中获取 bean 定义，并自动刷新上下文。
+	 *
+	 * @param componentClasses 一个或多个组件类——例如，
+	 *                         {@link Configuration @Configuration} 注解的类
 	 */
 	public AnnotationConfigApplicationContext(Class<?>... componentClasses) {
-		this();
-		register(componentClasses);
-		refresh();
+		this();                          // ① 调用无参构造器：初始化 reader、scanner 和 BeanFactory
+		register(componentClasses);      // ② 注册组件类：将配置类转换为 BeanDefinition 并注册到 BeanFactory
+		refresh();                       // ③ 刷新上下文：触发 BeanFactoryPostProcessor 解析 @Bean/@ComponentScan，
+		//    然后实例化所有非懒加载的单例 Bean
 	}
 
 	/**
@@ -152,20 +154,28 @@ public class AnnotationConfigApplicationContext extends GenericApplicationContex
 	//---------------------------------------------------------------------
 
 	/**
-	 * Register one or more component classes to be processed.
-	 * <p>Note that {@link #refresh()} must be called in order for the context
-	 * to fully process the new classes.
-	 * @param componentClasses one or more component classes &mdash; for example,
-	 * {@link Configuration @Configuration} classes
+	 * 注册一个或多个需要被处理的组件类。
+	 * <p>注意：必须调用 {@link #refresh()} 方法，上下文才能完全处理这些新注册的类。
+	 *
+	 * @param componentClasses 一个或多个组件类——例如，
+	 *                         {@link Configuration @Configuration} 注解的类
 	 * @see #scan(String...)
 	 * @see #refresh()
 	 */
 	@Override
 	public void register(Class<?>... componentClasses) {
+		// 断言：至少必须指定一个组件类，否则抛出 IllegalArgumentException
 		Assert.notEmpty(componentClasses, "At least one component class must be specified");
+
+		// 创建启动步骤记录（用于性能监控和诊断），标记这是一个"注册组件类"的操作
 		StartupStep registerComponentClass = getApplicationStartup().start("spring.context.component-classes.register")
-				.tag("classes", () -> Arrays.toString(componentClasses));
+				.tag("classes", () -> Arrays.toString(componentClasses));  // 将传入的类名数组作为标签记录
+
+		// 核心操作：通过 reader（AnnotatedBeanDefinitionReader）将配置类注册到 BeanFactory
+		// 这一步会为每个 componentClass 创建 BeanDefinition 并注册到 BeanFactory
 		this.reader.register(componentClasses);
+
+		// 结束启动步骤的记录
 		registerComponentClass.end();
 	}
 

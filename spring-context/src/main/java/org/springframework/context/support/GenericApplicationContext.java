@@ -275,16 +275,21 @@ public class GenericApplicationContext extends AbstractApplicationContext implem
 	//---------------------------------------------------------------------
 
 	/**
-	 * Do nothing: We hold a single internal BeanFactory and rely on callers
-	 * to register beans through our public methods (or the BeanFactory's).
+	 * 不做任何事：我们持有一个内部的 BeanFactory，并依赖调用方通过我们的公共方法
+	 * （或 BeanFactory 的方法）来注册 Bean。
+	 *
 	 * @see #registerBeanDefinition
 	 */
 	@Override
 	protected final void refreshBeanFactory() throws IllegalStateException {
+		// 使用 CAS 操作将 refreshed 标志从 false 改为 true
+		// 确保 refresh() 只能被调用一次
 		if (!this.refreshed.compareAndSet(false, true)) {
+			// 如果已经刷新过，抛出 IllegalStateException
 			throw new IllegalStateException(
 					"GenericApplicationContext does not support multiple refresh attempts: just call 'refresh' once");
 		}
+		// 设置 BeanFactory 的序列化 ID，用于反序列化时恢复状态
 		this.beanFactory.setSerializationId(getId());
 	}
 
@@ -304,8 +309,8 @@ public class GenericApplicationContext extends AbstractApplicationContext implem
 	}
 
 	/**
-	 * Return the single internal BeanFactory held by this context
-	 * (as ConfigurableListableBeanFactory).
+	 * 返回此上下文持有的单个内部 BeanFactory
+	 * （作为 ConfigurableListableBeanFactory 类型返回）
 	 */
 	@Override
 	public final ConfigurableListableBeanFactory getBeanFactory() {

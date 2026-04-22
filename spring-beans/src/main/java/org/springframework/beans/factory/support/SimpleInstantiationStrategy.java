@@ -57,37 +57,59 @@ public class SimpleInstantiationStrategy implements InstantiationStrategy {
 	}
 
 
+	/**
+	 * 实例化指定的 Bean。
+	 * 如果没有方法覆盖（lookup-method/replaced-method），直接通过反射调用无参构造函数。
+	 * 如果有方法覆盖，则通过 CGLIB 动态创建子类来实现方法拦截。
+	 */
 	@Override
 	public Object instantiate(RootBeanDefinition bd, @Nullable String beanName, BeanFactory owner) {
-		// Don't override the class with CGLIB if no overrides.
+
+		// ============ 情况1：没有方法覆盖 ============
+		// 检查 BeanDefinition 中是否有方法覆盖（lookup-method 或 replaced-method）
 		if (!bd.hasMethodOverrides()) {
+
 			Constructor<?> constructorToUse;
+
+			// 使用构造函数参数锁进行同步，保证线程安全
 			synchronized (bd.constructorArgumentLock) {
+				// 尝试从缓存中获取已解析的构造函数
 				constructorToUse = (Constructor<?>) bd.resolvedConstructorOrFactoryMethod;
+
 				if (constructorToUse == null) {
+					// 缓存中没有，需要解析构造函数
 					final Class<?> clazz = bd.getBeanClass();
+
+					// 检查是否为接口（接口不能被实例化）
 					if (clazz.isInterface()) {
 						throw new BeanInstantiationException(clazz, "Specified class is an interface");
 					}
+
 					try {
+						// 根据是否有安全管理器，选择不同方式获取无参构造函数
 						if (System.getSecurityManager() != null) {
+							// 有安全管理器：使用特权方式获取
 							constructorToUse = AccessController.doPrivileged(
 									(PrivilegedExceptionAction<Constructor<?>>) clazz::getDeclaredConstructor);
-						}
-						else {
+						} else {
+							// 普通情况：直接通过反射获取无参构造函数
 							constructorToUse = clazz.getDeclaredConstructor();
 						}
+						// 将解析好的构造函数缓存起来，下次直接使用
 						bd.resolvedConstructorOrFactoryMethod = constructorToUse;
-					}
-					catch (Throwable ex) {
+					} catch (Throwable ex) {
 						throw new BeanInstantiationException(clazz, "No default constructor found", ex);
 					}
 				}
 			}
+
+			// 通过反射调用构造函数创建实例
 			return BeanUtils.instantiateClass(constructorToUse);
 		}
+
+		// ============ 情况2：有方法覆盖 ============
+		// 需要使用 CGLIB 动态创建子类，以实现方法拦截
 		else {
-			// Must generate CGLIB subclass.
 			return instantiateWithMethodInjection(bd, beanName, owner);
 		}
 	}

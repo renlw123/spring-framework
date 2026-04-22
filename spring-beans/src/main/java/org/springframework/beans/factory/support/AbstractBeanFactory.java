@@ -235,130 +235,130 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	}
 
 	/**
-	 * Return an instance, which may be shared or independent, of the specified bean.
-	 * @param name the name of the bean to retrieve
-	 * @param requiredType the required type of the bean to retrieve
-	 * @param args arguments to use when creating a bean instance using explicit arguments
-	 * (only applied when creating a new instance as opposed to retrieving an existing one)
-	 * @param typeCheckOnly whether the instance is obtained for a type check,
-	 * not for actual use
-	 * @return an instance of the bean
-	 * @throws BeansException if the bean could not be created
+	 * 返回指定 bean 的实例，该实例可能是共享的（单例）或独立的（原型）。
+	 * 这是 Spring 中获取 Bean 的核心方法，所有的 getBean() 方法最终都会调用这个方法。
+	 *
+	 * @param name 要检索的 bean 的名称
+	 * @param requiredType 所需的 bean 类型（可以为 null）
+	 * @param args 使用显式参数创建 bean 实例时的参数（仅在创建新实例时适用，而非获取已有实例）
+	 * @param typeCheckOnly 是否仅用于类型检查（而非实际使用）
+	 * @return bean 的实例
+	 * @throws BeansException 如果无法创建 bean
 	 */
 	@SuppressWarnings("unchecked")
 	protected <T> T doGetBean(
 			String name, @Nullable Class<T> requiredType, @Nullable Object[] args, boolean typeCheckOnly)
 			throws BeansException {
 
+		// ============ 步骤1：转换 bean 名称 ============
+		// 处理别名、FactoryBean 的 & 前缀等
 		String beanName = transformedBeanName(name);
 		Object beanInstance;
 
-		// Eagerly check singleton cache for manually registered singletons.
+		// ============ 步骤2：尝试从缓存中获取单例 ============
+		// 检查单例缓存中是否有手动注册的单例
 		Object sharedInstance = getSingleton(beanName);
 		if (sharedInstance != null && args == null) {
+			// 找到缓存的实例（可能是正在创建中的实例，用于解决循环依赖）
 			if (logger.isTraceEnabled()) {
 				if (isSingletonCurrentlyInCreation(beanName)) {
 					logger.trace("Returning eagerly cached instance of singleton bean '" + beanName +
 							"' that is not fully initialized yet - a consequence of a circular reference");
-				}
-				else {
+				} else {
 					logger.trace("Returning cached instance of singleton bean '" + beanName + "'");
 				}
 			}
+			// 处理 FactoryBean：如果 bean 是 FactoryBean，返回它生产的实际对象
 			beanInstance = getObjectForBeanInstance(sharedInstance, name, beanName, null);
 		}
-
+		// ============ 步骤3：缓存中没有，需要创建新实例 ============
 		else {
-			// Fail if we're already creating this bean instance:
-			// We're assumably within a circular reference.
+			// 3.1 检查原型 bean 的循环依赖
+			// 原型 bean 不支持循环依赖，如果正在创建中又再次请求，直接抛异常
 			if (isPrototypeCurrentlyInCreation(beanName)) {
 				throw new BeanCurrentlyInCreationException(beanName);
 			}
 
-			// Check if bean definition exists in this factory.
+			// 3.2 检查父 BeanFactory
 			BeanFactory parentBeanFactory = getParentBeanFactory();
 			if (parentBeanFactory != null && !containsBeanDefinition(beanName)) {
-				// Not found -> check parent.
+				// 当前工厂没有这个 bean 的定义，委托给父工厂
 				String nameToLookup = originalBeanName(name);
 				if (parentBeanFactory instanceof AbstractBeanFactory) {
 					return ((AbstractBeanFactory) parentBeanFactory).doGetBean(
 							nameToLookup, requiredType, args, typeCheckOnly);
-				}
-				else if (args != null) {
-					// Delegation to parent with explicit args.
+				} else if (args != null) {
 					return (T) parentBeanFactory.getBean(nameToLookup, args);
-				}
-				else if (requiredType != null) {
-					// No args -> delegate to standard getBean method.
+				} else if (requiredType != null) {
 					return parentBeanFactory.getBean(nameToLookup, requiredType);
-				}
-				else {
+				} else {
 					return (T) parentBeanFactory.getBean(nameToLookup);
 				}
 			}
 
+			// 3.3 标记 bean 为已创建（如果不是仅类型检查）
 			if (!typeCheckOnly) {
 				markBeanAsCreated(beanName);
 			}
 
+			// 3.4 开始创建 bean（性能监控）
 			StartupStep beanCreation = this.applicationStartup.start("spring.beans.instantiate")
 					.tag("beanName", name);
 			try {
 				if (requiredType != null) {
 					beanCreation.tag("beanType", requiredType::toString);
 				}
+
+				// 3.5 获取合并后的 BeanDefinition（合并父类属性）
 				RootBeanDefinition mbd = getMergedLocalBeanDefinition(beanName);
 				checkMergedBeanDefinition(mbd, beanName, args);
 
-				// Guarantee initialization of beans that the current bean depends on.
+				// 3.6 处理 depends-on 依赖
+				// 确保当前 bean 依赖的其他 bean 先被初始化
 				String[] dependsOn = mbd.getDependsOn();
 				if (dependsOn != null) {
 					for (String dep : dependsOn) {
+						// 检查循环依赖（depends-on 循环）
 						if (isDependent(beanName, dep)) {
 							throw new BeanCreationException(mbd.getResourceDescription(), beanName,
 									"Circular depends-on relationship between '" + beanName + "' and '" + dep + "'");
 						}
 						registerDependentBean(dep, beanName);
 						try {
-							getBean(dep);
-						}
-						catch (NoSuchBeanDefinitionException ex) {
+							getBean(dep);  // 先初始化依赖的 bean
+						} catch (NoSuchBeanDefinitionException ex) {
 							throw new BeanCreationException(mbd.getResourceDescription(), beanName,
 									"'" + beanName + "' depends on missing bean '" + dep + "'", ex);
 						}
 					}
 				}
 
-				// Create bean instance.
+				// ============ 步骤4：根据作用域创建 bean 实例 ============
+
+				// 4.1 单例作用域
 				if (mbd.isSingleton()) {
 					sharedInstance = getSingleton(beanName, () -> {
 						try {
 							return createBean(beanName, mbd, args);
-						}
-						catch (BeansException ex) {
-							// Explicitly remove instance from singleton cache: It might have been put there
-							// eagerly by the creation process, to allow for circular reference resolution.
-							// Also remove any beans that received a temporary reference to the bean.
+						} catch (BeansException ex) {
 							destroySingleton(beanName);
 							throw ex;
 						}
 					});
 					beanInstance = getObjectForBeanInstance(sharedInstance, name, beanName, mbd);
 				}
-
+				// 4.2 原型作用域
 				else if (mbd.isPrototype()) {
-					// It's a prototype -> create a new instance.
 					Object prototypeInstance = null;
 					try {
 						beforePrototypeCreation(beanName);
 						prototypeInstance = createBean(beanName, mbd, args);
-					}
-					finally {
+					} finally {
 						afterPrototypeCreation(beanName);
 					}
 					beanInstance = getObjectForBeanInstance(prototypeInstance, name, beanName, mbd);
 				}
-
+				// 4.3 自定义作用域（如 request、session、websocket 等）
 				else {
 					String scopeName = mbd.getScope();
 					if (!StringUtils.hasLength(scopeName)) {
@@ -373,29 +373,28 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 							beforePrototypeCreation(beanName);
 							try {
 								return createBean(beanName, mbd, args);
-							}
-							finally {
+							} finally {
 								afterPrototypeCreation(beanName);
 							}
 						});
 						beanInstance = getObjectForBeanInstance(scopedInstance, name, beanName, mbd);
-					}
-					catch (IllegalStateException ex) {
+					} catch (IllegalStateException ex) {
 						throw new ScopeNotActiveException(beanName, scopeName, ex);
 					}
 				}
-			}
-			catch (BeansException ex) {
+			} catch (BeansException ex) {
 				beanCreation.tag("exception", ex.getClass().toString());
 				beanCreation.tag("message", String.valueOf(ex.getMessage()));
 				cleanupAfterBeanCreationFailure(beanName);
 				throw ex;
-			}
-			finally {
+			} finally {
 				beanCreation.end();
 			}
 		}
 
+		// ============ 步骤5：类型适配 ============
+		// 如果 requiredType 不为 null，且返回的 bean 实例不是 requiredType 类型，
+		// 则尝试进行类型转换
 		return adaptBeanInstance(name, beanInstance, requiredType);
 	}
 

@@ -87,17 +87,21 @@ public class CglibSubclassingInstantiationStrategy extends SimpleInstantiationSt
 
 
 	/**
-	 * An inner class created for historical reasons to avoid external CGLIB dependency
-	 * in Spring versions earlier than 3.2.
+	 * 一个内部类，由于历史原因而创建，目的是在 Spring 3.2 之前的版本中避免外部 CGLIB 依赖。
+	 *
+	 * 这个类负责使用 CGLIB 动态创建子类，以支持 lookup-method 和 replaced-method 功能。
 	 */
 	private static class CglibSubclassCreator {
 
+		// 定义 CGLIB 回调类型数组（三个回调，按索引对应）
+		// 索引 0: NoOp - 不做任何处理的方法
+		// 索引 1: LookupOverrideMethodInterceptor - 处理 @Lookup 方法
+		// 索引 2: ReplaceOverrideMethodInterceptor - 处理 replaced-method
 		private static final Class<?>[] CALLBACK_TYPES = new Class<?>[]
 				{NoOp.class, LookupOverrideMethodInterceptor.class, ReplaceOverrideMethodInterceptor.class};
 
-		private final RootBeanDefinition beanDefinition;
-
-		private final BeanFactory owner;
+		private final RootBeanDefinition beanDefinition;  // Bean 定义
+		private final BeanFactory owner;                   // 所属的 BeanFactory
 
 		CglibSubclassCreator(RootBeanDefinition beanDefinition, BeanFactory owner) {
 			this.beanDefinition = beanDefinition;
@@ -105,53 +109,73 @@ public class CglibSubclassingInstantiationStrategy extends SimpleInstantiationSt
 		}
 
 		/**
-		 * Create a new instance of a dynamically generated subclass implementing the
-		 * required lookups.
-		 * @param ctor constructor to use. If this is {@code null}, use the
-		 * no-arg constructor (no parameterization, or Setter Injection)
-		 * @param args arguments to use for the constructor.
-		 * Ignored if the {@code ctor} parameter is {@code null}.
-		 * @return new instance of the dynamically generated subclass
+		 * 创建动态生成的子类的新实例，该子类实现了所需的方法查找功能。
+		 *
+		 * @param ctor 要使用的构造函数。如果为 {@code null}，则使用无参构造函数
+		 * @param args 用于构造函数的参数，如果 {@code ctor} 参数为 {@code null} 则忽略
+		 * @return 动态生成的子类的新实例
 		 */
 		public Object instantiate(@Nullable Constructor<?> ctor, Object... args) {
+			// ============ 步骤1：创建 CGLIB 增强子类 ============
 			Class<?> subclass = createEnhancedSubclass(this.beanDefinition);
+
 			Object instance;
+
+			// ============ 步骤2：实例化子类 ============
 			if (ctor == null) {
+				// 使用无参构造函数实例化
 				instance = BeanUtils.instantiateClass(subclass);
-			}
-			else {
+			} else {
+				// 使用指定的带参构造函数实例化
 				try {
+					// 获取子类中对应的构造函数（参数类型相同）
 					Constructor<?> enhancedSubclassConstructor = subclass.getConstructor(ctor.getParameterTypes());
+					// 调用构造函数创建实例
 					instance = enhancedSubclassConstructor.newInstance(args);
-				}
-				catch (Exception ex) {
+				} catch (Exception ex) {
 					throw new BeanInstantiationException(this.beanDefinition.getBeanClass(),
 							"Failed to invoke constructor for CGLIB enhanced subclass [" + subclass.getName() + "]", ex);
 				}
 			}
-			// SPR-10785: set callbacks directly on the instance instead of in the
-			// enhanced class (via the Enhancer) in order to avoid memory leaks.
+
+			// ============ 步骤3：设置 CGLIB 回调（方法拦截器）============
+			// SPR-10785: 直接在实例上设置回调，而不是在增强类中设置（通过 Enhancer），以避免内存泄漏
 			Factory factory = (Factory) instance;
-			factory.setCallbacks(new Callback[] {NoOp.INSTANCE,
-					new LookupOverrideMethodInterceptor(this.beanDefinition, this.owner),
-					new ReplaceOverrideMethodInterceptor(this.beanDefinition, this.owner)});
+			factory.setCallbacks(new Callback[] {
+					NoOp.INSTANCE,                                              // 索引0：普通方法，不做拦截
+					new LookupOverrideMethodInterceptor(this.beanDefinition, this.owner),  // 索引1：处理 @Lookup
+					new ReplaceOverrideMethodInterceptor(this.beanDefinition, this.owner)   // 索引2：处理 replaced-method
+			});
+
 			return instance;
 		}
 
 		/**
-		 * Create an enhanced subclass of the bean class for the provided bean
-		 * definition, using CGLIB.
+		 * 为提供的 Bean 定义创建增强子类，使用 CGLIB。
 		 */
 		private Class<?> createEnhancedSubclass(RootBeanDefinition beanDefinition) {
+			// 创建 CGLIB 增强器
 			Enhancer enhancer = new Enhancer();
+
+			// 设置父类（目标类）
 			enhancer.setSuperclass(beanDefinition.getBeanClass());
+
+			// 设置命名策略（Spring 自定义的命名策略）
 			enhancer.setNamingPolicy(SpringNamingPolicy.INSTANCE);
+
+			// 设置类加载器
 			if (this.owner instanceof ConfigurableBeanFactory) {
 				ClassLoader cl = ((ConfigurableBeanFactory) this.owner).getBeanClassLoader();
 				enhancer.setStrategy(new ClassLoaderAwareGeneratorStrategy(cl));
 			}
+
+			// 设置回调过滤器（决定哪个方法使用哪个回调索引）
 			enhancer.setCallbackFilter(new MethodOverrideCallbackFilter(beanDefinition));
+
+			// 设置回调类型数组
 			enhancer.setCallbackTypes(CALLBACK_TYPES);
+
+			// 生成并返回增强的子类 Class 对象
 			return enhancer.createClass();
 		}
 	}
