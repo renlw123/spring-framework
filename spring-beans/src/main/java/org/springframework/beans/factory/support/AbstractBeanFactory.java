@@ -1146,18 +1146,98 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 		return getMergedLocalBeanDefinition(beanName);
 	}
 
+
+	/**
+	 *
+	 * 工厂bean区别与普通的bean实例
+	 * 1.普通注册的bean实例就是实例本身
+	 * 2.但是工厂bean实际注册的是调用了getObject()返回的对象，类型是getObjectType()
+	 * 3.mybatis和Spring的整合SqlSessionFactoryBean
+	 *
+	 * // 1. 定义一个Mapper接口（没有实现类）
+	 * public interface UserMapper {
+	 *     @Select("SELECT * FROM user WHERE id = #{id}")
+	 *     User selectById(Long id);
+	 * }
+	 *
+	 * // 2. MyBatis提供的FactoryBean实现
+	 * public class MapperFactoryBean<T> implements FactoryBean<T> {
+	 *
+	 *     private Class<T> mapperInterface;
+	 *     private SqlSession sqlSession;
+	 *
+	 *     public MapperFactoryBean(Class<T> mapperInterface) {
+	 *         this.mapperInterface = mapperInterface;
+	 *     }
+	 *
+	 *     @Override
+	 *     public T getObject() throws Exception {
+	 *         // 通过SqlSession动态生成Mapper代理对象
+	 *         return sqlSession.getMapper(mapperInterface);
+	 *     }
+	 *
+	 *     @Override
+	 *     public Class<?> getObjectType() {
+	 *         return mapperInterface;
+	 *     }
+	 *
+	 *     @Override
+	 *     public boolean isSingleton() {
+	 *         return true; // 单例模式
+	 *     }
+	 * }
+	 *
+	 * // 3. Spring配置中使用MapperFactoryBean
+	 * @Configuration
+	 * public class MyBatisConfig {
+	 *
+	 *     @Bean
+	 *     public MapperFactoryBean<UserMapper> userMapper(SqlSession sqlSession) {
+	 *         MapperFactoryBean<UserMapper> factoryBean = new MapperFactoryBean<>(UserMapper.class);
+	 *         factoryBean.setSqlSession(sqlSession);
+	 *         return factoryBean;
+	 *     }
+	 * }
+	 *
+	 * // 4. 使用Mapper（直接注入接口，Spring会通过FactoryBean生成代理对象）
+	 * @Service
+	 * public class UserService {
+	 *
+	 *     @Autowired
+	 *     private UserMapper userMapper; // 这里注入的不是FactoryBean本身，而是getObject()返回的代理对象
+	 *
+	 *     public User getUser(Long id) {
+	 *         return userMapper.selectById(id); // 调用代理对象的方法
+	 *     }
+	 * }
+	 *
+	 * // 5. 如果需要获取FactoryBean本身，可以使用"&"前缀
+	 * @Autowired
+	 * private FactoryBean<UserMapper> &userMapper; // 获取MapperFactoryBean实例
+	 */
 	@Override
 	public boolean isFactoryBean(String name) throws NoSuchBeanDefinitionException {
+		// 将传入的bean名称转换为实际的bean名称（去除"&"前缀，因为"&"前缀表示获取FactoryBean本身）
 		String beanName = transformedBeanName(name);
+
+		// 尝试从单例缓存中获取bean实例（注意：参数false表示不创建新的实例）
 		Object beanInstance = getSingleton(beanName, false);
+
 		if (beanInstance != null) {
+			// 如果已经存在实例，直接判断该实例是否是FactoryBean类型
+			// 例如：MyBatis的MapperFactoryBean实例会返回true
 			return (beanInstance instanceof FactoryBean);
 		}
-		// No singleton instance found -> check bean definition.
+
+		// 当前容器中没有该bean的单例实例，需要检查bean定义
 		if (!containsBeanDefinition(beanName) && getParentBeanFactory() instanceof ConfigurableBeanFactory) {
-			// No bean definition found in this factory -> delegate to parent.
+			// 当前容器中没有找到bean定义，且存在父容器，则委托给父容器处理
+			// 例如：在Spring Boot中，子容器可能没有某bean，但父容器（如根容器）中有
 			return ((ConfigurableBeanFactory) getParentBeanFactory()).isFactoryBean(name);
 		}
+
+		// 获取合并后的bean定义（处理父子bean定义继承），然后判断该bean是否是FactoryBean
+		// 这里的isFactoryBean方法会根据bean定义中的class类型、factory-method等来判断
 		return isFactoryBean(beanName, getMergedLocalBeanDefinition(beanName));
 	}
 
