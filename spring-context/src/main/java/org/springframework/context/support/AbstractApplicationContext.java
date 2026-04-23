@@ -599,7 +599,7 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 				// ============ 步骤6：调用 BeanFactoryPostProcessor ============
 				StartupStep beanPostProcess = this.applicationStartup.start("spring.context.beans.post-process");
 
-				// 6.1 调用所有 BeanFactoryPostProcessor
+				// 6.1 调用所有 BeanDefinitionRegistryPostProcessor 与 BeanFactoryPostProcessor
 				// 这些处理器可以在 Bean 实例化之前修改 Bean 的定义信息
 				// 例如：PropertyPlaceholderConfigurer 会替换 ${...} 占位符
 				invokeBeanFactoryPostProcessors(beanFactory);
@@ -815,18 +815,40 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 	/**
-	 * Instantiate and invoke all registered BeanFactoryPostProcessor beans,
-	 * respecting explicit order if given.
-	 * <p>Must be called before singleton instantiation.
+	 * 实例化并调用所有注册的BeanFactoryPostProcessor Bean
+	 * 如果指定了顺序，则按照顺序执行
+	 *
+	 * 注意：必须在单例Bean实例化之前调用此方法
+	 *
+	 * 这是Spring容器启动过程中的关键步骤，负责执行所有Bean工厂后置处理器
+	 * 执行时机：所有BeanDefinition加载完成后，任何Bean实例化之前
+	 *
+	 * @param beanFactory 可配置的列表式Bean工厂
 	 */
 	protected void invokeBeanFactoryPostProcessors(ConfigurableListableBeanFactory beanFactory) {
+		// 委托给PostProcessorRegistrationDelegate来处理BeanFactoryPostProcessor的调用
+		// 参数：
+		// 1. beanFactory - 当前的Bean工厂
+		// 2. getBeanFactoryPostProcessors() - 获取手动添加的BeanFactoryPostProcessor列表
+		//    这些是通过applicationContext.addBeanFactoryPostProcessor()手动添加的，
+		//    优先级高于通过BeanDefinition注册的后置处理器
 		PostProcessorRegistrationDelegate.invokeBeanFactoryPostProcessors(beanFactory, getBeanFactoryPostProcessors());
 
-		// Detect a LoadTimeWeaver and prepare for weaving, if found in the meantime
-		// (e.g. through an @Bean method registered by ConfigurationClassPostProcessor)
+		// 检测LoadTimeWeaver（加载时织入）并准备织入
+		// LoadTimeWeaver用于AspectJ的加载时织入，在类加载时修改字节码
+		// 以下条件同时满足时才会执行：
+		// 1. 不是原生镜像环境（Native Image）
+		// 2. BeanFactory中没有临时类加载器
+		// 3. BeanFactory中包含名为"loadTimeWeaver"的Bean
 		if (!NativeDetector.inNativeImage() && beanFactory.getTempClassLoader() == null &&
 				beanFactory.containsBean(LOAD_TIME_WEAVER_BEAN_NAME)) {
+
+			// 添加LoadTimeWeaverAwareProcessor作为BeanPostProcessor
+			// 这个处理器负责为实现了LoadTimeWeaverAware接口的Bean设置LoadTimeWeaver
 			beanFactory.addBeanPostProcessor(new LoadTimeWeaverAwareProcessor(beanFactory));
+
+			// 设置临时类加载器，用于在织入时加载类
+			// ContextTypeMatchClassLoader是特殊的类加载器，用于处理类型匹配
 			beanFactory.setTempClassLoader(new ContextTypeMatchClassLoader(beanFactory.getBeanClassLoader()));
 		}
 	}

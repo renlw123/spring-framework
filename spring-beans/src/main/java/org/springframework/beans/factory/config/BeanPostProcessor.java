@@ -20,87 +20,99 @@ import org.springframework.beans.BeansException;
 import org.springframework.lang.Nullable;
 
 /**
- * Factory hook that allows for custom modification of new bean instances &mdash;
- * for example, checking for marker interfaces or wrapping beans with proxies.
+ * Bean后置处理器接口 - Spring框架中最重要的扩展接口之一
  *
- * <p>Typically, post-processors that populate beans via marker interfaces
- * or the like will implement {@link #postProcessBeforeInitialization},
- * while post-processors that wrap beans with proxies will normally
- * implement {@link #postProcessAfterInitialization}.
+ * 功能：允许在Bean实例化完成后、初始化前后对Bean实例进行自定义修改
  *
- * <h3>Registration</h3>
- * <p>An {@code ApplicationContext} can autodetect {@code BeanPostProcessor} beans
- * in its bean definitions and apply those post-processors to any beans subsequently
- * created. A plain {@code BeanFactory} allows for programmatic registration of
- * post-processors, applying them to all beans created through the bean factory.
+ * 核心特点：
+ * 1. 操作对象是Bean实例（已创建的对象），而不是BeanDefinition
+ * 2. 在Spring容器管理Bean的生命周期中提供两个扩展点
+ * 3. 可以对Bean进行包装、代理、检查、修改等操作
+ * 4. 所有BeanPostProcessor都会被应用到容器中的每个Bean实例上
  *
- * <h3>Ordering</h3>
- * <p>{@code BeanPostProcessor} beans that are autodetected in an
- * {@code ApplicationContext} will be ordered according to
- * {@link org.springframework.core.PriorityOrdered} and
- * {@link org.springframework.core.Ordered} semantics. In contrast,
- * {@code BeanPostProcessor} beans that are registered programmatically with a
- * {@code BeanFactory} will be applied in the order of registration; any ordering
- * semantics expressed through implementing the
- * {@code PriorityOrdered} or {@code Ordered} interface will be ignored for
- * programmatically registered post-processors. Furthermore, the
- * {@link org.springframework.core.annotation.Order @Order} annotation is not
- * taken into account for {@code BeanPostProcessor} beans.
+ * 典型应用场景：
+ * - 代理生成：@Transactional、@Async等注解的代理实现
+ * - 属性注入：@Autowired、@Value等注解的处理
+ * - 方法拦截：添加AOP切面逻辑
+ * - 初始化检查：验证Bean的合法性
+ * - 对象增强：添加额外的功能或属性
+ *
+ * 执行时机（Bean生命周期）：
+ * 1. 实例化Bean（构造方法）
+ * 2. 填充属性（依赖注入）
+ * 3. ★ postProcessBeforeInitialization（初始化前）★
+ * 4. 初始化（InitializingBean.afterPropertiesSet + init-method）
+ * 5. ★ postProcessAfterInitialization（初始化后）★
+ * 6. Bean就绪，可以被使用
+ * 7. 销毁（DisposableBean.destroy + destroy-method）
  *
  * @author Juergen Hoeller
  * @author Sam Brannen
  * @since 10.10.2003
- * @see InstantiationAwareBeanPostProcessor
- * @see DestructionAwareBeanPostProcessor
- * @see ConfigurableBeanFactory#addBeanPostProcessor
- * @see BeanFactoryPostProcessor
+ * @see InstantiationAwareBeanPostProcessor  # 扩展：在实例化前后处理
+ * @see DestructionAwareBeanPostProcessor    # 扩展：在销毁时处理
+ * @see ConfigurableBeanFactory#addBeanPostProcessor  # 编程式注册
+ * @see BeanFactoryPostProcessor  # 区别：处理BeanDefinition，而非实例
  */
 public interface BeanPostProcessor {
 
 	/**
-	 * 在 bean 初始化回调（如 InitializingBean 的 afterPropertiesSet 或自定义 init-method）之前，
-	 * 将此 {@code BeanPostProcessor} 应用于给定的新 bean 实例。
-	 * 此时 bean 已经被填充了属性值。
-	 * 返回的 bean 实例可能是原始 bean 的包装器。
+	 * 在Bean初始化回调之前应用此BeanPostProcessor
 	 *
-	 * <p>默认实现原样返回给定的 {@code bean}。
+	 * 执行时机：
+	 * - 属性填充（依赖注入）已完成
+	 * - 初始化方法（afterPropertiesSet、init-method）尚未调用
 	 *
-	 * @param bean 新的 bean 实例
-	 * @param beanName bean 的名称
-	 * @return 要使用的 bean 实例，可能是原始实例或包装后的实例；
-	 *         如果返回 {@code null}，则后续的 BeanPostProcessor 将不会被调用
+	 * 可以做：
+	 * - 修改Bean的属性值
+	 * - 检查Bean是否满足某种规范
+	 * - 返回代理对象（但通常在after中做）
+	 * - 返回null会阻止后续后置处理器执行
+	 *
+	 * 注意：如果返回null，后续的BeanPostProcessor将不会被调用
+	 *
+	 * @param bean 新的bean实例（已经填充了属性值）
+	 * @param beanName bean的名称
+	 * @return 要使用的bean实例（原始实例或包装后的实例）
 	 * @throws org.springframework.beans.BeansException 如果发生错误
 	 * @see org.springframework.beans.factory.InitializingBean#afterPropertiesSet
 	 */
 	@Nullable
 	default Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
-		return bean;  // 默认实现：什么都不做，直接返回原 bean
+		return bean;  // 默认实现：直接返回原bean，不做任何处理
 	}
 
 	/**
-	 * Apply this {@code BeanPostProcessor} to the given new bean instance <i>after</i> any bean
-	 * initialization callbacks (like InitializingBean's {@code afterPropertiesSet}
-	 * or a custom init-method). The bean will already be populated with property values.
-	 * The returned bean instance may be a wrapper around the original.
-	 * <p>In case of a FactoryBean, this callback will be invoked for both the FactoryBean
-	 * instance and the objects created by the FactoryBean (as of Spring 2.0). The
-	 * post-processor can decide whether to apply to either the FactoryBean or created
-	 * objects or both through corresponding {@code bean instanceof FactoryBean} checks.
-	 * <p>This callback will also be invoked after a short-circuiting triggered by a
-	 * {@link InstantiationAwareBeanPostProcessor#postProcessBeforeInstantiation} method,
-	 * in contrast to all other {@code BeanPostProcessor} callbacks.
-	 * <p>The default implementation returns the given {@code bean} as-is.
-	 * @param bean the new bean instance
-	 * @param beanName the name of the bean
-	 * @return the bean instance to use, either the original or a wrapped one;
-	 * if {@code null}, no subsequent BeanPostProcessors will be invoked
-	 * @throws org.springframework.beans.BeansException in case of errors
+	 * 在Bean初始化回调之后应用此BeanPostProcessor
+	 *
+	 * 执行时机：
+	 * - 初始化方法（afterPropertiesSet、init-method）已完成
+	 * - Bean已经完全初始化，即将被使用
+	 *
+	 * 典型用途：
+	 * - 生成代理对象（如@Transactional、@Async）
+	 * - 返回包装对象增强功能
+	 * - 注册监控或监听器
+	 *
+	 * 特殊说明：
+	 * 1. 对于FactoryBean，这个回调会调用两次：
+	 *    - 第一次：FactoryBean实例本身
+	 *    - 第二次：FactoryBean创建的Bean实例
+	 *    可以通过 instanceof 判断来区分处理
+	 *
+	 * 2. 如果InstantiationAwareBeanPostProcessor的postProcessBeforeInstantiation
+	 *    返回了非null对象（短路处理），此方法仍然会被调用
+	 *
+	 * @param bean 新的bean实例
+	 * @param beanName bean的名称
+	 * @return 要使用的bean实例（原始实例或包装后的实例）
+	 * @throws org.springframework.beans.BeansException 如果发生错误
 	 * @see org.springframework.beans.factory.InitializingBean#afterPropertiesSet
 	 * @see org.springframework.beans.factory.FactoryBean
 	 */
 	@Nullable
 	default Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
-		return bean;
+		return bean;  // 默认实现：直接返回原bean
 	}
 
 }

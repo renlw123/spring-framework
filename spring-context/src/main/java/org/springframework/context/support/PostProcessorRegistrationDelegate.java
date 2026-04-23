@@ -56,49 +56,109 @@ final class PostProcessorRegistrationDelegate {
 	}
 
 
+	/**
+	 * 实例化并调用所有注册的BeanFactoryPostProcessor
+	 *
+	 * 这是Spring容器启动过程中最复杂的方法之一，负责按正确的顺序执行所有后置处理器
+	 *
+	 * 重要警告：虽然看起来这个方法可以用更少的循环和列表重构，但使用多个循环和多次
+	 * 遍历处理器名称列表是有意为之的。我们必须确保遵守PriorityOrdered和Ordered处理器
+	 * 的契约。具体来说，我们不能以错误的顺序实例化处理器（通过getBean()调用）或在
+	 * ApplicationContext中注册它们。
+	 *
+	 * 核心设计原则：
+	 * 1. 必须先处理BeanDefinitionRegistryPostProcessor，再处理普通BeanFactoryPostProcessor
+	 * 2. 严格按照 PriorityOrdered > Ordered > 无顺序 的优先级执行
+	 * 3. 允许在处理过程中动态注册新的后置处理器（通过reiterate循环）
+	 * 4. 不初始化FactoryBean，保持所有普通bean未初始化状态
+	 *
+	 * public class BaseBeanDefinitionRegistryPostProcessor
+	 *         implements BeanDefinitionRegistryPostProcessor, PriorityOrdered {
+	 *
+	 *     private final Logger logger = LoggerFactory.getLogger(getClass());
+	 *
+	 *     @Override
+	 *     public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry)
+	 *             throws BeansException {
+	 *         logger.info("开始处理 BeanDefinition 注册表");
+	 *
+	 *         // 1. 获取所有已注册的 BeanDefinition 名称
+	 *         String[] beanNames = registry.getBeanDefinitionNames();
+	 *
+	 *         // 2. 遍历处理
+	 *         for (String beanName : beanNames) {
+	 *             BeanDefinition bd = registry.getBeanDefinition(beanName);
+	 *             // 处理逻辑...
+	 *         }
+	 *
+	 *         // 3. 动态注册新的 BeanDefinition
+	 *         registerNewBeanDefinitions(registry);
+	 *
+	 *         // 4. 移除或替换已有的 BeanDefinition
+	 *         replaceBeanDefinitions(registry);
+	 *
+	 *         logger.info("BeanDefinition 处理完成");
+	 *     }
+	 *
+	 *     @Override
+	 *     public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory)
+	 *             throws BeansException {
+	 *         // 可以在这里修改 BeanFactory 的属性
+	 *         // 或者获取 BeanDefinition 进行修改
+	 *     }
+	 *
+	 *     @Override
+	 *     public int getOrder() {
+	 *         return 0; // 优先级，数值越小越靠前
+	 *     }
+	 *
+	 *     protected void registerNewBeanDefinitions(BeanDefinitionRegistry registry) {
+	 *         // 子类实现
+	 *     }
+	 *
+	 *     protected void replaceBeanDefinitions(BeanDefinitionRegistry registry) {
+	 *         // 子类实现
+	 *     }
+	 * }
+	 *
+	 * @param beanFactory Spring的Bean工厂
+	 * @param beanFactoryPostProcessors 手动注册的后置处理器列表
+	 */
 	public static void invokeBeanFactoryPostProcessors(
-			ConfigurableListableBeanFactory beanFactory, List<BeanFactoryPostProcessor> beanFactoryPostProcessors) {
+			ConfigurableListableBeanFactory beanFactory,
+			List<BeanFactoryPostProcessor> beanFactoryPostProcessors) {
 
-		// WARNING: Although it may appear that the body of this method can be easily
-		// refactored to avoid the use of multiple loops and multiple lists, the use
-		// of multiple lists and multiple passes over the names of processors is
-		// intentional. We must ensure that we honor the contracts for PriorityOrdered
-		// and Ordered processors. Specifically, we must NOT cause processors to be
-		// instantiated (via getBean() invocations) or registered in the ApplicationContext
-		// in the wrong order.
-		//
-		// Before submitting a pull request (PR) to change this method, please review the
-		// list of all declined PRs involving changes to PostProcessorRegistrationDelegate
-		// to ensure that your proposal does not result in a breaking change:
-		// https://github.com/spring-projects/spring-framework/issues?q=PostProcessorRegistrationDelegate+is%3Aclosed+label%3A%22status%3A+declined%22
-
-		// Invoke BeanDefinitionRegistryPostProcessors first, if any.
+		// 记录已处理的Bean名称，避免重复处理
 		Set<String> processedBeans = new HashSet<>();
 
+		// ========== 第一阶段：处理BeanDefinitionRegistryPostProcessor ==========
+		// 只有当BeanFactory实现了BeanDefinitionRegistry接口时才能注册新的Bean定义
 		if (beanFactory instanceof BeanDefinitionRegistry) {
 			BeanDefinitionRegistry registry = (BeanDefinitionRegistry) beanFactory;
+
+			// 分类存储：普通的BeanFactoryPostProcessor 和 注册表专用处理器
 			List<BeanFactoryPostProcessor> regularPostProcessors = new ArrayList<>();
 			List<BeanDefinitionRegistryPostProcessor> registryProcessors = new ArrayList<>();
 
+			// 1.1 首先处理手动注册的BeanDefinitionRegistryPostProcessor
+			// 这些是通过applicationContext.addBeanFactoryPostProcessor()手动添加的
 			for (BeanFactoryPostProcessor postProcessor : beanFactoryPostProcessors) {
 				if (postProcessor instanceof BeanDefinitionRegistryPostProcessor) {
 					BeanDefinitionRegistryPostProcessor registryProcessor =
 							(BeanDefinitionRegistryPostProcessor) postProcessor;
+					// 立即调用，这些处理器优先级最高
 					registryProcessor.postProcessBeanDefinitionRegistry(registry);
 					registryProcessors.add(registryProcessor);
-				}
-				else {
+				} else {
 					regularPostProcessors.add(postProcessor);
 				}
 			}
 
-			// Do not initialize FactoryBeans here: We need to leave all regular beans
-			// uninitialized to let the bean factory post-processors apply to them!
-			// Separate between BeanDefinitionRegistryPostProcessors that implement
-			// PriorityOrdered, Ordered, and the rest.
+			// 用于存储当前批次要执行的处理器
 			List<BeanDefinitionRegistryPostProcessor> currentRegistryProcessors = new ArrayList<>();
 
-			// First, invoke the BeanDefinitionRegistryPostProcessors that implement PriorityOrdered.
+			// 1.2 处理实现了PriorityOrdered接口的BeanDefinitionRegistryPostProcessor
+			// 注意：不初始化FactoryBean，保持所有普通bean未初始化状态
 			String[] postProcessorNames =
 					beanFactory.getBeanNamesForType(BeanDefinitionRegistryPostProcessor.class, true, false);
 			for (String ppName : postProcessorNames) {
@@ -107,12 +167,13 @@ final class PostProcessorRegistrationDelegate {
 					processedBeans.add(ppName);
 				}
 			}
+			// 排序后执行
 			sortPostProcessors(currentRegistryProcessors, beanFactory);
 			registryProcessors.addAll(currentRegistryProcessors);
 			invokeBeanDefinitionRegistryPostProcessors(currentRegistryProcessors, registry, beanFactory.getApplicationStartup());
 			currentRegistryProcessors.clear();
 
-			// Next, invoke the BeanDefinitionRegistryPostProcessors that implement Ordered.
+			// 1.3 处理实现了Ordered接口的BeanDefinitionRegistryPostProcessor
 			postProcessorNames = beanFactory.getBeanNamesForType(BeanDefinitionRegistryPostProcessor.class, true, false);
 			for (String ppName : postProcessorNames) {
 				if (!processedBeans.contains(ppName) && beanFactory.isTypeMatch(ppName, Ordered.class)) {
@@ -125,7 +186,8 @@ final class PostProcessorRegistrationDelegate {
 			invokeBeanDefinitionRegistryPostProcessors(currentRegistryProcessors, registry, beanFactory.getApplicationStartup());
 			currentRegistryProcessors.clear();
 
-			// Finally, invoke all other BeanDefinitionRegistryPostProcessors until no further ones appear.
+			// 1.4 循环处理剩余的BeanDefinitionRegistryPostProcessor
+			// 因为处理器可能会注册新的后置处理器，所以需要循环直到没有新的出现
 			boolean reiterate = true;
 			while (reiterate) {
 				reiterate = false;
@@ -134,7 +196,7 @@ final class PostProcessorRegistrationDelegate {
 					if (!processedBeans.contains(ppName)) {
 						currentRegistryProcessors.add(beanFactory.getBean(ppName, BeanDefinitionRegistryPostProcessor.class));
 						processedBeans.add(ppName);
-						reiterate = true;
+						reiterate = true;  // 发现有新的处理器，需要继续循环
 					}
 				}
 				sortPostProcessors(currentRegistryProcessors, beanFactory);
@@ -143,46 +205,44 @@ final class PostProcessorRegistrationDelegate {
 				currentRegistryProcessors.clear();
 			}
 
-			// Now, invoke the postProcessBeanFactory callback of all processors handled so far.
+			// 1.5 调用所有已处理处理器的postProcessBeanFactory方法（继承自BeanFactoryPostProcessor）
 			invokeBeanFactoryPostProcessors(registryProcessors, beanFactory);
 			invokeBeanFactoryPostProcessors(regularPostProcessors, beanFactory);
-		}
-
-		else {
-			// Invoke factory processors registered with the context instance.
+		} else {
+			// 如果BeanFactory不支持注册新Bean定义，直接调用手动注册的处理器
 			invokeBeanFactoryPostProcessors(beanFactoryPostProcessors, beanFactory);
 		}
 
-		// Do not initialize FactoryBeans here: We need to leave all regular beans
-		// uninitialized to let the bean factory post-processors apply to them!
+		// ========== 第二阶段：处理普通的BeanFactoryPostProcessor ==========
+		// 此时所有BeanDefinitionRegistryPostProcessor已经执行完毕
+
+		// 获取所有BeanFactoryPostProcessor类型的Bean名称
+		// 注意：不初始化FactoryBean
 		String[] postProcessorNames =
 				beanFactory.getBeanNamesForType(BeanFactoryPostProcessor.class, true, false);
 
-		// Separate between BeanFactoryPostProcessors that implement PriorityOrdered,
-		// Ordered, and the rest.
+		// 按优先级分类
 		List<BeanFactoryPostProcessor> priorityOrderedPostProcessors = new ArrayList<>();
 		List<String> orderedPostProcessorNames = new ArrayList<>();
 		List<String> nonOrderedPostProcessorNames = new ArrayList<>();
+
 		for (String ppName : postProcessorNames) {
 			if (processedBeans.contains(ppName)) {
-				// skip - already processed in first phase above
-			}
-			else if (beanFactory.isTypeMatch(ppName, PriorityOrdered.class)) {
+				// 第一阶段已经处理过的，跳过
+			} else if (beanFactory.isTypeMatch(ppName, PriorityOrdered.class)) {
 				priorityOrderedPostProcessors.add(beanFactory.getBean(ppName, BeanFactoryPostProcessor.class));
-			}
-			else if (beanFactory.isTypeMatch(ppName, Ordered.class)) {
+			} else if (beanFactory.isTypeMatch(ppName, Ordered.class)) {
 				orderedPostProcessorNames.add(ppName);
-			}
-			else {
+			} else {
 				nonOrderedPostProcessorNames.add(ppName);
 			}
 		}
 
-		// First, invoke the BeanFactoryPostProcessors that implement PriorityOrdered.
+		// 2.1 先执行PriorityOrdered的处理器
 		sortPostProcessors(priorityOrderedPostProcessors, beanFactory);
 		invokeBeanFactoryPostProcessors(priorityOrderedPostProcessors, beanFactory);
 
-		// Next, invoke the BeanFactoryPostProcessors that implement Ordered.
+		// 2.2 再执行Ordered的处理器
 		List<BeanFactoryPostProcessor> orderedPostProcessors = new ArrayList<>(orderedPostProcessorNames.size());
 		for (String postProcessorName : orderedPostProcessorNames) {
 			orderedPostProcessors.add(beanFactory.getBean(postProcessorName, BeanFactoryPostProcessor.class));
@@ -190,15 +250,14 @@ final class PostProcessorRegistrationDelegate {
 		sortPostProcessors(orderedPostProcessors, beanFactory);
 		invokeBeanFactoryPostProcessors(orderedPostProcessors, beanFactory);
 
-		// Finally, invoke all other BeanFactoryPostProcessors.
+		// 2.3 最后执行无顺序的处理器
 		List<BeanFactoryPostProcessor> nonOrderedPostProcessors = new ArrayList<>(nonOrderedPostProcessorNames.size());
 		for (String postProcessorName : nonOrderedPostProcessorNames) {
 			nonOrderedPostProcessors.add(beanFactory.getBean(postProcessorName, BeanFactoryPostProcessor.class));
 		}
 		invokeBeanFactoryPostProcessors(nonOrderedPostProcessors, beanFactory);
 
-		// Clear cached merged bean definitions since the post-processors might have
-		// modified the original metadata, e.g. replacing placeholders in values...
+		// 清空缓存的合并Bean定义，因为后置处理器可能修改了原始元数据（如替换占位符）
 		beanFactory.clearMetadataCache();
 	}
 
@@ -300,15 +359,39 @@ final class PostProcessorRegistrationDelegate {
 	}
 
 	/**
-	 * Invoke the given BeanDefinitionRegistryPostProcessor beans.
+	 * 调用给定的 BeanDefinitionRegistryPostProcessor 处理器集合
+	 *
+	 * 该方法负责逐个执行后置处理器的 postProcessBeanDefinitionRegistry 方法，
+	 * 并集成 Spring 的应用程序启动监控（ApplicationStartup）来记录执行指标
+	 *
+	 * 执行时机：在 Bean 定义加载完成后，Bean 实例化之前
+	 * 主要功能：允许后置处理器动态注册、修改或移除 Bean 定义
+	 *
+	 * @param postProcessors 要执行的 BeanDefinitionRegistryPostProcessor 处理器集合
+	 * @param registry Bean 定义注册表，用于注册、查询、修改 Bean 定义
+	 * @param applicationStartup 应用程序启动监控组件，用于收集性能指标和执行信息
 	 */
 	private static void invokeBeanDefinitionRegistryPostProcessors(
-			Collection<? extends BeanDefinitionRegistryPostProcessor> postProcessors, BeanDefinitionRegistry registry, ApplicationStartup applicationStartup) {
+			Collection<? extends BeanDefinitionRegistryPostProcessor> postProcessors,
+			BeanDefinitionRegistry registry,
+			ApplicationStartup applicationStartup) {
 
+		// 遍历所有后置处理器，逐个执行
 		for (BeanDefinitionRegistryPostProcessor postProcessor : postProcessors) {
-			StartupStep postProcessBeanDefRegistry = applicationStartup.start("spring.context.beandef-registry.post-process")
+			// 创建启动步骤监控对象，用于记录该处理器的执行信息
+			// "spring.context.beandef-registry.post-process" 是步骤名称，用于标识这是 Bean 定义注册表后置处理阶段
+			StartupStep postProcessBeanDefRegistry = applicationStartup
+					.start("spring.context.beandef-registry.post-process")
+					// 添加标签（tag），记录后置处理器的名称或描述信息
+					// postProcessor::toString 方法引用会在需要时调用 toString() 获取处理器信息
 					.tag("postProcessor", postProcessor::toString);
+
+			// 执行核心方法：调用后置处理器的 postProcessBeanDefinitionRegistry
+			// 这是扩展点，允许处理器修改 Bean 定义注册表
 			postProcessor.postProcessBeanDefinitionRegistry(registry);
+
+			// 结束监控步骤，记录执行耗时等信息
+			// 这会收集从 start() 到 end() 之间的执行时间等指标
 			postProcessBeanDefRegistry.end();
 		}
 	}
