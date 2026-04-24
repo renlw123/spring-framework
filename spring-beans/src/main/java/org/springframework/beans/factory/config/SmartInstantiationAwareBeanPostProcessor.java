@@ -22,14 +22,20 @@ import org.springframework.beans.BeansException;
 import org.springframework.lang.Nullable;
 
 /**
- * Extension of the {@link InstantiationAwareBeanPostProcessor} interface,
- * adding a callback for predicting the eventual type of a processed bean.
+ * {@link InstantiationAwareBeanPostProcessor} 接口的扩展，
+ * 添加了用于预测处理后 Bean 最终类型的回调方法。
  *
- * <p><b>NOTE:</b> This interface is a special purpose interface, mainly for
- * internal use within the framework. In general, application-provided
- * post-processors should simply implement the plain {@link BeanPostProcessor}
- * interface or derive from the {@link InstantiationAwareBeanPostProcessorAdapter}
- * class. New methods might be added to this interface even in point releases.
+ * <p><b>注意：</b> 这是一个特殊用途的接口，主要用于框架内部使用。
+ * 通常情况下，应用程序提供的后置处理器应该直接实现普通的 {@link BeanPostProcessor}
+ * 接口，或者继承 {@link InstantiationAwareBeanPostProcessorAdapter} 类。
+ * 即使是在补丁版本中，也可能向此接口添加新方法。
+ *
+ * <p>这个接口解决了 Spring 容器在 Bean 实例化前的三个高级问题：
+ * <ol>
+ *   <li>类型预测 - 在实例化前知道 Bean 的最终类型（如 AOP 代理类型）</li>
+ *   <li>构造器选择 - 当 Bean 有多个构造器时，选择合适的构造器实例化</li>
+ *   <li>早期引用暴露 - 处理循环依赖时，提前暴露 Bean 的引用（可能是代理对象）</li>
+ * </ol>
  *
  * @author Juergen Hoeller
  * @since 2.0.3
@@ -38,13 +44,25 @@ import org.springframework.lang.Nullable;
 public interface SmartInstantiationAwareBeanPostProcessor extends InstantiationAwareBeanPostProcessor {
 
 	/**
-	 * Predict the type of the bean to be eventually returned from this
-	 * processor's {@link #postProcessBeforeInstantiation} callback.
-	 * <p>The default implementation returns {@code null}.
-	 * @param beanClass the raw class of the bean
-	 * @param beanName the name of the bean
-	 * @return the type of the bean, or {@code null} if not predictable
-	 * @throws org.springframework.beans.BeansException in case of errors
+	 * 预测最终将从该处理器的 {@link #postProcessBeforeInstantiation} 回调中返回的 Bean 类型
+	 *
+	 * <p>这个方法的主要作用是在 Bean 实例化之前，让 Spring 知道 Bean 的最终类型。
+	 * 这在以下场景特别有用：
+	 * <ul>
+	 *   <li>AOP 代理：虽然原始类是 UserService，但最终返回的是代理对象</li>
+	 *   <li>FactoryBean：预测 FactoryBean 创建的对象类型</li>
+	 *   <li>动态代理：MyBatis Mapper 接口的动态代理类型预测</li>
+	 * </ul>
+	 *
+	 * <p>调用时机：在 {@link #postProcessBeforeInstantiation} 之前，
+	 * 当 Spring 需要知道 Bean 类型进行依赖注入匹配时调用
+	 *
+	 * <p>默认实现返回 {@code null}，表示无法预测
+	 *
+	 * @param beanClass Bean 的原始类（未经任何处理的原始类）
+	 * @param beanName Bean 的名称
+	 * @return Bean 的预测类型，如果无法预测则返回 {@code null}
+	 * @throws org.springframework.beans.BeansException 如果发生错误
 	 */
 	@Nullable
 	default Class<?> predictBeanType(Class<?> beanClass, String beanName) throws BeansException {
@@ -52,12 +70,32 @@ public interface SmartInstantiationAwareBeanPostProcessor extends InstantiationA
 	}
 
 	/**
-	 * Determine the candidate constructors to use for the given bean.
-	 * <p>The default implementation returns {@code null}.
-	 * @param beanClass the raw class of the bean (never {@code null})
-	 * @param beanName the name of the bean
-	 * @return the candidate constructors, or {@code null} if none specified
-	 * @throws org.springframework.beans.BeansException in case of errors
+	 * 确定用于给定 Bean 的候选构造器
+	 *
+	 * <p>当 Bean 有多个构造器时，Spring 需要知道应该使用哪个构造器来实例化 Bean。
+	 * 这个方法允许后置处理器指定候选构造器列表。
+	 *
+	 * <p>典型使用场景：
+	 * <ul>
+	 *   <li>{@code @Autowired} 注解处理：返回带 @Autowired 注解的构造器</li>
+	 *   <li>多构造器选择：根据环境配置选择不同的构造器</li>
+	 *   <li>参数最多的构造器：Spring 默认会选择参数最多的构造器</li>
+	 * </ul>
+	 *
+	 * <p>调用时机：在 {@link #postProcessBeforeInstantiation} 之后，
+	 * 在真正创建 Bean 实例之前，用于确定使用哪个构造器
+	 *
+	 * <p>返回值说明：
+	 * <ul>
+	 *   <li>返回非空数组：Spring 将使用指定的构造器进行实例化</li>
+	 *   <li>返回空数组：表示没有可用的构造器（如接口类型）</li>
+	 *   <li>返回 {@code null}：让 Spring 使用默认的构造器解析逻辑</li>
+	 * </ul>
+	 *
+	 * @param beanClass Bean 的原始类（永远不会为 {@code null}）
+	 * @param beanName Bean 的名称
+	 * @return 候选构造器数组，如果没有指定则返回 {@code null}
+	 * @throws org.springframework.beans.BeansException 如果发生错误
 	 */
 	@Nullable
 	default Constructor<?>[] determineCandidateConstructors(Class<?> beanClass, String beanName)
@@ -67,28 +105,35 @@ public interface SmartInstantiationAwareBeanPostProcessor extends InstantiationA
 	}
 
 	/**
-	 * Obtain a reference for early access to the specified bean,
-	 * typically for the purpose of resolving a circular reference.
-	 * <p>This callback gives post-processors a chance to expose a wrapper
-	 * early - that is, before the target bean instance is fully initialized.
-	 * The exposed object should be equivalent to the what
-	 * {@link #postProcessBeforeInitialization} / {@link #postProcessAfterInitialization}
-	 * would expose otherwise. Note that the object returned by this method will
-	 * be used as bean reference unless the post-processor returns a different
-	 * wrapper from said post-process callbacks. In other words: Those post-process
-	 * callbacks may either eventually expose the same reference or alternatively
-	 * return the raw bean instance from those subsequent callbacks (if the wrapper
-	 * for the affected bean has been built for a call to this method already,
-	 * it will be exposes as final bean reference by default).
-	 * <p>The default implementation returns the given {@code bean} as-is.
-	 * @param bean the raw bean instance
-	 * @param beanName the name of the bean
-	 * @return the object to expose as bean reference
-	 * (typically with the passed-in bean instance as default)
-	 * @throws org.springframework.beans.BeansException in case of errors
+	 * 获取指定 Bean 的早期访问引用，通常用于解决循环引用问题
+	 *
+	 * <p>这个回调允许后置处理器提前暴露包装对象 - 即在目标 Bean 实例完全初始化之前。
+	 * 暴露的对象应该等同于 {@link #postProcessBeforeInitialization} /
+	 * {@link #postProcessAfterInitialization} 否则会暴露的对象。
+	 *
+	 * <p>重要说明：
+	 * <ul>
+	 *   <li>此方法返回的对象将作为 Bean 引用被使用，除非后置处理器从后续回调中返回了不同的包装器</li>
+	 *   <li>如果已经为受影响的 Bean 构建了包装器，它默认将作为最终的 Bean 引用暴露</li>
+	 *   <li>主要用于解决循环依赖 + AOP 代理的场景</li>
+	 * </ul>
+	 *
+	 * <p>典型使用场景：
+	 * <ul>
+	 *   <li>循环依赖 + AOP 代理：提前暴露代理对象而不是原始对象</li>
+	 *   <li>避免循环依赖中的代理不一致问题</li>
+	 * </ul>
+	 *
+	 * <p>调用时机：在 Bean 实例化后、属性填充前，当检测到循环依赖时调用
+	 *
+	 * <p>默认实现按原样返回给定的 {@code bean}
+	 *
+	 * @param bean 原始的 Bean 实例（已经实例化但可能未完全初始化）
+	 * @param beanName Bean 的名称
+	 * @return 作为 Bean 引用暴露的对象（默认情况下返回传入的 Bean 实例）
+	 * @throws org.springframework.beans.BeansException 如果发生错误
 	 */
 	default Object getEarlyBeanReference(Object bean, String beanName) throws BeansException {
 		return bean;
 	}
-
 }

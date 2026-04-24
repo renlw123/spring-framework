@@ -536,105 +536,173 @@ public class DefaultListableBeanFactory extends AbstractAutowireCapableBeanFacto
 		return getBeanNamesForType(type, true, true);
 	}
 
+	/**
+	 * 获取匹配指定类型（包括子类）的 Bean 名称
+	 *
+	 * 这是 DefaultListableBeanFactory 中的核心实现，使用了缓存机制来优化性能
+	 *
+	 * 核心优化：
+	 * 1. 使用缓存存储类型查找结果（allBeanNamesByType 和 singletonBeanNamesByType）
+	 * 2. 只有在配置稳定且允许缓存时才使用缓存
+	 * 3. 类型安全的缓存策略（ClassUtils.isCacheSafe 检查）
+	 *
+	 * @param type 要匹配的类或接口，如果为 null 则返回所有 Bean 名称
+	 * @param includeNonSingletons 是否包含原型或作用域 Bean，还是仅单例
+	 * @param allowEagerInit 是否允许提前初始化 FactoryBean 来确定类型
+	 * @return 匹配的 Bean 名称数组
+	 */
 	@Override
-	public String[] getBeanNamesForType(@Nullable Class<?> type, boolean includeNonSingletons, boolean allowEagerInit) {
+	public String[] getBeanNamesForType(@Nullable Class<?> type,
+										boolean includeNonSingletons,
+										boolean allowEagerInit) {
+		// ========== 分支1：不使用缓存的情况 ==========
+		// 满足以下任一条件时，直接执行查找（不经过缓存）：
+		// 1. 配置未冻结（Configuration not frozen）：BeanDefinition 可能还会被修改
+		// 2. type 为 null：查找所有 Bean，无法缓存
+		// 3. allowEagerInit 为 false：不需要提前初始化，采用保守策略
 		if (!isConfigurationFrozen() || type == null || !allowEagerInit) {
-			return doGetBeanNamesForType(ResolvableType.forRawClass(type), includeNonSingletons, allowEagerInit);
+			return doGetBeanNamesForType(ResolvableType.forRawClass(type),
+					includeNonSingletons,
+					allowEagerInit);
 		}
-		Map<Class<?>, String[]> cache =
-				(includeNonSingletons ? this.allBeanNamesByType : this.singletonBeanNamesByType);
+
+		// ========== 分支2：使用缓存的情况 ==========
+		// 配置已冻结、type 不为 null、且 allowEagerInit 为 true
+
+		// 根据是否包含非单例选择不同的缓存 Map
+		// - allBeanNamesByType: 缓存所有 Bean（包括非单例）
+		// - singletonBeanNamesByType: 只缓存单例 Bean
+		Map<Class<?>, String[]> cache = (includeNonSingletons ?
+				this.allBeanNamesByType :
+				this.singletonBeanNamesByType);
+
+		// 2.1 尝试从缓存中获取
 		String[] resolvedBeanNames = cache.get(type);
 		if (resolvedBeanNames != null) {
+			// 缓存命中，直接返回
 			return resolvedBeanNames;
 		}
-		resolvedBeanNames = doGetBeanNamesForType(ResolvableType.forRawClass(type), includeNonSingletons, true);
+
+		// 2.2 缓存未命中，执行实际查找
+		// 注意：这里 allowEagerInit 传入 true，因为缓存场景允许提前初始化
+		resolvedBeanNames = doGetBeanNamesForType(ResolvableType.forRawClass(type),
+				includeNonSingletons,
+				true);
+
+		// 2.3 检查缓存安全性
+		// ClassUtils.isCacheSafe 检查确保类加载器是安全的（避免 ClassLoader 内存泄漏）
 		if (ClassUtils.isCacheSafe(type, getBeanClassLoader())) {
+			// 安全的情况下，将结果存入缓存
 			cache.put(type, resolvedBeanNames);
 		}
+
 		return resolvedBeanNames;
 	}
 
-	private String[] doGetBeanNamesForType(ResolvableType type, boolean includeNonSingletons, boolean allowEagerInit) {
+	/**
+	 * 实际执行类型查找的核心方法
+	 *
+	 * 这是 getBeanNamesForType 的核心实现，负责遍历所有 BeanDefinition
+	 * 和手动注册的单例，判断其类型是否匹配
+	 *
+	 * @param type 要匹配的类型（ResolvableType，支持泛型）
+	 * @param includeNonSingletons 是否包含非单例 Bean
+	 * @param allowEagerInit 是否允许提前初始化 FactoryBean
+	 * @return 匹配的 Bean 名称数组
+	 */
+	private String[] doGetBeanNamesForType(ResolvableType type,
+										   boolean includeNonSingletons,
+										   boolean allowEagerInit) {
 		List<String> result = new ArrayList<>();
 
-		// Check all bean definitions.
+		// ========== 第一阶段：遍历所有 BeanDefinition ==========
 		for (String beanName : this.beanDefinitionNames) {
-			// Only consider bean as eligible if the bean name is not defined as alias for some other bean.
+			// 跳过别名定义（只处理真正的 Bean 名称）
 			if (!isAlias(beanName)) {
 				try {
+					// 1. 获取合并后的 BeanDefinition（处理父子继承）
 					RootBeanDefinition mbd = getMergedLocalBeanDefinition(beanName);
-					// Only check bean definition if it is complete.
+
+					// 2. 检查是否应该处理这个 BeanDefinition
+					// 条件：非抽象 && (允许提前初始化 或 满足以下条件)
+					//   - 有 Bean 类 或 非懒加载 或 允许提前类加载
+					//   - 不需要提前初始化（即不是 FactoryBean 引用）
 					if (!mbd.isAbstract() && (allowEagerInit ||
 							(mbd.hasBeanClass() || !mbd.isLazyInit() || isAllowEagerClassLoading()) &&
 									!requiresEagerInitForType(mbd.getFactoryBeanName()))) {
+
+						// 3. 判断是否为 FactoryBean
 						boolean isFactoryBean = isFactoryBean(beanName, mbd);
 						BeanDefinitionHolder dbd = mbd.getDecoratedDefinition();
 						boolean matchFound = false;
+
+						// 判断是否允许初始化 FactoryBean
 						boolean allowFactoryBeanInit = (allowEagerInit || containsSingleton(beanName));
 						boolean isNonLazyDecorated = (dbd != null && !mbd.isLazyInit());
+
+						// 4. 处理普通 Bean（非 FactoryBean）
 						if (!isFactoryBean) {
 							if (includeNonSingletons || isSingleton(beanName, mbd, dbd)) {
+								// 检查类型是否匹配
 								matchFound = isTypeMatch(beanName, type, allowFactoryBeanInit);
 							}
 						}
+						// 5. 处理 FactoryBean
 						else {
+							// 5.1 先检查 FactoryBean 创建的对象是否匹配
 							if (includeNonSingletons || isNonLazyDecorated ||
 									(allowFactoryBeanInit && isSingleton(beanName, mbd, dbd))) {
 								matchFound = isTypeMatch(beanName, type, allowFactoryBeanInit);
 							}
+							// 5.2 如果不匹配，再检查 FactoryBean 本身是否匹配（添加 & 前缀）
 							if (!matchFound) {
-								// In case of FactoryBean, try to match FactoryBean instance itself next.
-								beanName = FACTORY_BEAN_PREFIX + beanName;
-								if (includeNonSingletons || isSingleton(beanName, mbd, dbd)) {
-									matchFound = isTypeMatch(beanName, type, allowFactoryBeanInit);
+								String factoryBeanName = FACTORY_BEAN_PREFIX + beanName;
+								if (includeNonSingletons || isSingleton(factoryBeanName, mbd, dbd)) {
+									matchFound = isTypeMatch(factoryBeanName, type, allowFactoryBeanInit);
 								}
 							}
 						}
+
+						// 6. 如果匹配，添加到结果列表
 						if (matchFound) {
 							result.add(beanName);
 						}
 					}
-				}
-				catch (CannotLoadBeanClassException | BeanDefinitionStoreException ex) {
+				} catch (CannotLoadBeanClassException | BeanDefinitionStoreException ex) {
+					// 处理类加载异常
 					if (allowEagerInit) {
-						throw ex;
+						throw ex;  // 允许提前初始化时直接抛出异常
 					}
-					// Probably a placeholder: let's ignore it for type matching purposes.
-					LogMessage message = (ex instanceof CannotLoadBeanClassException ?
-							LogMessage.format("Ignoring bean class loading failure for bean '%s'", beanName) :
-							LogMessage.format("Ignoring unresolvable metadata in bean definition '%s'", beanName));
-					logger.trace(message, ex);
-					// Register exception, in case the bean was accidentally unresolvable.
+					// 否则忽略，可能是占位符
+					logger.trace(LogMessage.format("Ignoring bean class loading failure for bean '%s'", beanName), ex);
 					onSuppressedException(ex);
-				}
-				catch (NoSuchBeanDefinitionException ex) {
-					// Bean definition got removed while we were iterating -> ignore.
+				} catch (NoSuchBeanDefinitionException ex) {
+					// Bean 定义在遍历时被移除，忽略
 				}
 			}
 		}
 
-		// Check manually registered singletons too.
+		// ========== 第二阶段：遍历手动注册的单例 ==========
+		// 这些单例是通过 registerSingleton() 方法直接注册的，没有 BeanDefinition
 		for (String beanName : this.manualSingletonNames) {
 			try {
-				// In case of FactoryBean, match object created by FactoryBean.
+				// 1. 处理 FactoryBean 类型
 				if (isFactoryBean(beanName)) {
+					// 先检查 FactoryBean 创建的对象
 					if ((includeNonSingletons || isSingleton(beanName)) && isTypeMatch(beanName, type)) {
 						result.add(beanName);
-						// Match found for this bean: do not match FactoryBean itself anymore.
-						continue;
+						continue;  // 匹配成功，跳过 FactoryBean 本身的检查
 					}
-					// In case of FactoryBean, try to match FactoryBean itself next.
+					// 再检查 FactoryBean 本身（添加 & 前缀）
 					beanName = FACTORY_BEAN_PREFIX + beanName;
 				}
-				// Match raw bean instance (might be raw FactoryBean).
+				// 2. 检查原始 Bean 实例是否匹配
 				if (isTypeMatch(beanName, type)) {
 					result.add(beanName);
 				}
-			}
-			catch (NoSuchBeanDefinitionException ex) {
-				// Shouldn't happen - probably a result of circular reference resolution...
-				logger.trace(LogMessage.format(
-						"Failed to check manually registered singleton with name '%s'", beanName), ex);
+			} catch (NoSuchBeanDefinitionException ex) {
+				// 可能由于循环引用导致，忽略
+				logger.trace(LogMessage.format("Failed to check manually registered singleton with name '%s'", beanName), ex);
 			}
 		}
 

@@ -702,16 +702,20 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 	@Override
 	@Nullable
 	protected Class<?> predictBeanType(String beanName, RootBeanDefinition mbd, Class<?>... typesToMatch) {
+		// 1. 先确定基础的目标类型
 		Class<?> targetType = determineTargetType(beanName, mbd, typesToMatch);
-		// Apply SmartInstantiationAwareBeanPostProcessors to predict the
-		// eventual type after a before-instantiation shortcut.
+
+		// 2. 如果有后置处理器，应用它们来预测最终类型
 		if (targetType != null && !mbd.isSynthetic() && hasInstantiationAwareBeanPostProcessors()) {
 			boolean matchingOnlyFactoryBean = (typesToMatch.length == 1 && typesToMatch[0] == FactoryBean.class);
+
+			// 3. 👇 这里遍历所有 SmartInstantiationAwareBeanPostProcessor
 			for (SmartInstantiationAwareBeanPostProcessor bp : getBeanPostProcessorCache().smartInstantiationAware) {
+				// 4. 👇 调用 Smart 接口的 predictBeanType 方法
 				Class<?> predicted = bp.predictBeanType(targetType, beanName);
 				if (predicted != null &&
 						(!matchingOnlyFactoryBean || FactoryBean.class.isAssignableFrom(predicted))) {
-					return predicted;
+					return predicted;  // 返回预测的类型
 				}
 			}
 		}

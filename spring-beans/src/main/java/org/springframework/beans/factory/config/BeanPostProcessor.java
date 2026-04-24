@@ -53,6 +53,56 @@ import org.springframework.lang.Nullable;
  * @see DestructionAwareBeanPostProcessor    # 扩展：在销毁时处理
  * @see ConfigurableBeanFactory#addBeanPostProcessor  # 编程式注册
  * @see BeanFactoryPostProcessor  # 区别：处理BeanDefinition，而非实例
+ *
+ *
+ * Bean 创建流程                   可干预的接口和方法
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ *
+ * 1. 实例化前
+ *    ↓                           ✅ SmartInstantiationAwareBeanPostProcessor
+ *                                └── predictBeanType() - 预测类型
+ *
+ *    ↓                           ✅ InstantiationAwareBeanPostProcessor
+ *                                └── postProcessBeforeInstantiation() - 实例化前
+ *                                (可以完全替换掉 Bean，返回代理对象)
+ *
+ * 2. 选择构造器
+ *    ↓                           ✅ SmartInstantiationAwareBeanPostProcessor
+ *                                └── determineCandidateConstructors() - 选择构造器
+ *
+ * 3. 实例化
+ *    ↓                           (通过构造器反射创建实例)
+ *
+ * 4. 实例化后
+ *    ↓                           ✅ InstantiationAwareBeanPostProcessor
+ *                                └── postProcessAfterInstantiation() - 实例化后
+ *                                (返回 false 可以跳过属性填充)
+ *
+ * 5. 属性填充（依赖注入）
+ *    ↓                           ✅ InstantiationAwareBeanPostProcessor
+ *                                └── postProcessProperties() - 处理属性
+ *                                └── postProcessPropertyValues() - 处理属性值
+ *
+ * 6. 循环依赖处理
+ *    ↓                           ✅ SmartInstantiationAwareBeanPostProcessor
+ *                                └── getEarlyBeanReference() - 暴露早期引用
+ *
+ * 7. 初始化前
+ *    ↓                           ✅ BeanPostProcessor
+ *                                └── postProcessBeforeInitialization() - 初始化前
+ *                                (如 @PostConstruct 处理)
+ *
+ * 8. 初始化
+ *    ↓                           (执行 afterPropertiesSet、init-method)
+ *
+ * 9. 初始化后
+ *    ↓                           ✅ BeanPostProcessor
+ *                                └── postProcessAfterInitialization() - 初始化后
+ *                                (如 AOP 代理生成，返回代理对象)
+ *
+ * 10. Bean 就绪
+ *
+ *
  */
 public interface BeanPostProcessor {
 

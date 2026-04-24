@@ -976,27 +976,60 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 	/**
-	 * Add beans that implement ApplicationListener as listeners.
-	 * Doesn't affect other listeners, which can be added without being beans.
+	 * 将实现了 ApplicationListener 接口的 Bean 添加为事件监听器
+	 *
+	 * 这个方法负责注册 Spring 的事件监听器，不影晌其他可以非 Bean 方式添加的监听器
+	 *
+	 * 执行时机：在 refresh() 方法中，位于 registerBeanPostProcessors() 之后，
+	 *           finishBeanFactoryInitialization() 之前
+	 *
+	 * 重要特性：
+	 * 1. 只注册监听器，不实例化普通 Bean
+	 * 2. 支持提前发布早期事件（在监听器注册前发生的事件）
+	 * 3. 延迟实例化 FactoryBean 类型的监听器
+	 *
+	 * @see ApplicationListener
+	 * @see ApplicationEventMulticaster
 	 */
 	protected void registerListeners() {
-		// Register statically specified listeners first.
+		// ========== 第一阶段：注册静态指定的监听器 ==========
+		// 这些是通过 applicationContext.addApplicationListener() 手动添加的监听器
+		// 优先级最高，立即注册
 		for (ApplicationListener<?> listener : getApplicationListeners()) {
+			// 获取事件广播器并添加监听器
 			getApplicationEventMulticaster().addApplicationListener(listener);
 		}
 
-		// Do not initialize FactoryBeans here: We need to leave all regular beans
-		// uninitialized to let post-processors apply to them!
+		// ========== 第二阶段：注册 Bean 定义中的监听器 ==========
+		// 注意：不初始化 FactoryBean，保持所有普通 Bean 未初始化状态
+		// 让后置处理器能够应用于它们
+
+		// 获取所有实现了 ApplicationListener 接口的 Bean 名称
+		// 参数说明：
+		// - ApplicationListener.class：要查找的类型
+		// - true：包括非单例（原型作用域的监听器）
+		// - false：不提前初始化 FactoryBean
 		String[] listenerBeanNames = getBeanNamesForType(ApplicationListener.class, true, false);
+
 		for (String listenerBeanName : listenerBeanNames) {
+			// 注意：这里只注册 Bean 名称，不实际获取 Bean 实例
+			// 监听器 Bean 会在后续需要时通过 getBean() 延迟实例化
 			getApplicationEventMulticaster().addApplicationListenerBean(listenerBeanName);
 		}
 
-		// Publish early application events now that we finally have a multicaster...
+		// ========== 第三阶段：发布早期事件 ==========
+		// 现在终于有了事件广播器，可以处理在注册监听器之前发生的早期事件了
+
+		// 获取早期事件集合（在监听器注册前发布的事件）
 		Set<ApplicationEvent> earlyEventsToProcess = this.earlyApplicationEvents;
+		// 清空早期事件缓存，避免重复处理
 		this.earlyApplicationEvents = null;
+
+		// 如果有早期事件，现在广播它们
 		if (!CollectionUtils.isEmpty(earlyEventsToProcess)) {
 			for (ApplicationEvent earlyEvent : earlyEventsToProcess) {
+				// 使用事件广播器发布事件
+				// 此时所有监听器已经注册，事件能被正确处理
 				getApplicationEventMulticaster().multicastEvent(earlyEvent);
 			}
 		}
@@ -1421,9 +1454,28 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 		return getBeanFactory().getBeanNamesForType(type);
 	}
 
+	/**
+	 * 获取指定类型的所有 Bean 名称
+	 *
+	 * 这是 ApplicationContext 中获取 Bean 名称的核心方法，委托给底层的 BeanFactory 执行
+	 *
+	 * @param type 要匹配的 Bean 类型（可以是接口、类或 null）
+	 * @param includeNonSingletons 是否包含非单例 Bean（原型作用域、请求作用域等）
+	 * @param allowEagerInit 是否允许提前初始化 Bean（包括 FactoryBean 的初始化）
+	 * @return 匹配的 Bean 名称数组（可能为空数组）
+	 * @throws IllegalStateException 如果 BeanFactory 尚未激活（容器未启动）
+	 */
 	@Override
-	public String[] getBeanNamesForType(@Nullable Class<?> type, boolean includeNonSingletons, boolean allowEagerInit) {
+	public String[] getBeanNamesForType(@Nullable Class<?> type,
+										boolean includeNonSingletons,
+										boolean allowEagerInit) {
+		// 1. 断言 BeanFactory 处于激活状态
+		//    确保容器已经启动，能够安全地访问 BeanFactory
 		assertBeanFactoryActive();
+
+		// 2. 委托给底层的 BeanFactory 执行实际的类型查找
+		//    getBeanFactory() 返回 ConfigurableListableBeanFactory
+		//    实际执行的是 DefaultListableBeanFactory.getBeanNamesForType()
 		return getBeanFactory().getBeanNamesForType(type, includeNonSingletons, allowEagerInit);
 	}
 

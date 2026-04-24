@@ -215,37 +215,29 @@ public interface ListableBeanFactory extends BeanFactory {
 	String[] getBeanNamesForType(@Nullable Class<?> type);
 
 	/**
-	 * Return the names of beans matching the given type (including subclasses),
-	 * judging from either bean definitions or the value of {@code getObjectType}
-	 * in the case of FactoryBeans.
-	 * <p><b>NOTE: This method introspects top-level beans only.</b> It does <i>not</i>
-	 * check nested beans which might match the specified type as well.
-	 * <p>Does consider objects created by FactoryBeans if the "allowEagerInit" flag is set,
-	 * which means that FactoryBeans will get initialized. If the object created by the
-	 * FactoryBean doesn't match, the raw FactoryBean itself will be matched against the
-	 * type. If "allowEagerInit" is not set, only raw FactoryBeans will be checked
-	 * (which doesn't require initialization of each FactoryBean).
-	 * <p>Does not consider any hierarchy this factory may participate in.
-	 * Use BeanFactoryUtils' {@code beanNamesForTypeIncludingAncestors}
-	 * to include beans in ancestor factories too.
-	 * <p>Note: Does <i>not</i> ignore singleton beans that have been registered
-	 * by other means than bean definitions.
-	 * <p>Bean names returned by this method should always return bean names <i>in the
-	 * order of definition</i> in the backend configuration, as far as possible.
-	 * @param type the class or interface to match, or {@code null} for all bean names
-	 * @param includeNonSingletons whether to include prototype or scoped beans too
-	 * or just singletons (also applies to FactoryBeans)
-	 * @param allowEagerInit whether to initialize <i>lazy-init singletons</i> and
-	 * <i>objects created by FactoryBeans</i> (or by factory methods with a
-	 * "factory-bean" reference) for the type check. Note that FactoryBeans need to be
-	 * eagerly initialized to determine their type: So be aware that passing in "true"
-	 * for this flag will initialize FactoryBeans and "factory-bean" references.
-	 * @return the names of beans (or objects created by FactoryBeans) matching
-	 * the given object type (including subclasses), or an empty array if none
+	 * 获取匹配指定类型（包括子类）的 Bean 名称
+	 *
+	 * 这是一个强大的类型查找方法，可以根据 Bean 定义或 FactoryBean 的 getObjectType 值来判断
+	 *
+	 * 重要特性：
+	 * 1. 只检查顶级 Bean，不检查嵌套 Bean
+	 * 2. 支持 FactoryBean 类型的判断（当 allowEagerInit 为 true 时）
+	 * 3. 不检查父工厂（BeanFactory 层级），需要使用 BeanFactoryUtils 工具类
+	 * 4. 包含通过非 BeanDefinition 方式注册的单例 Bean
+	 * 5. 返回的 Bean 名称尽可能按照定义顺序排列
+	 *
+	 * @param type 要匹配的类或接口，如果为 null 则返回所有 Bean 名称
+	 * @param includeNonSingletons 是否包含原型或作用域 Bean，还是仅单例（也适用于 FactoryBean）
+	 * @param allowEagerInit 是否允许提前初始化懒加载单例和 FactoryBean 创建的对象来进行类型检查
+	 *                      注意：FactoryBean 需要提前初始化才能确定其类型
+	 *                      true 会初始化 FactoryBean 和 factory-bean 引用
+	 * @return 匹配的 Bean 名称数组，如果没有匹配则返回空数组
 	 * @see FactoryBean#getObjectType
-	 * @see BeanFactoryUtils#beanNamesForTypeIncludingAncestors(ListableBeanFactory, Class, boolean, boolean)
+	 * @see BeanFactoryUtils#beanNamesForTypeIncludingAncestors
 	 */
-	String[] getBeanNamesForType(@Nullable Class<?> type, boolean includeNonSingletons, boolean allowEagerInit);
+	String[] getBeanNamesForType(@Nullable Class<?> type,
+								 boolean includeNonSingletons,
+								 boolean allowEagerInit);
 
 	/**
 	 * Return the bean instances that match the given object type (including
