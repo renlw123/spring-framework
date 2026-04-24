@@ -599,7 +599,7 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 				// ============ 步骤6：调用 BeanFactoryPostProcessor ============
 				StartupStep beanPostProcess = this.applicationStartup.start("spring.context.beans.post-process");
 
-				// 6.1 调用所有 BeanDefinitionRegistryPostProcessor 与 BeanFactoryPostProcessor
+				// 6.1 调用所有 BeanDefinitionRegistryPostProcessor 与 BeanFactoryPostProcessor 其次还包含ConfigurationClassPostProcessor.java
 				// 这些处理器可以在 Bean 实例化之前修改 Bean 的定义信息
 				// 例如：PropertyPlaceholderConfigurer 会替换 ${...} 占位符
 				invokeBeanFactoryPostProcessors(beanFactory);
@@ -854,11 +854,27 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 	/**
-	 * Instantiate and register all BeanPostProcessor beans,
-	 * respecting explicit order if given.
-	 * <p>Must be called before any instantiation of application beans.
+	 * 实例化并注册所有的 BeanPostProcessor Bean
+	 * 如果指定了顺序，则按照顺序执行
+	 *
+	 * 注意：必须在任何应用 Bean 实例化之前调用此方法
+	 *
+	 * BeanPostProcessor 是 Spring 容器中非常重要的扩展接口，
+	 * 它允许在 Bean 初始化前后进行自定义处理（如代理生成、依赖注入等）
+	 *
+	 * 与 BeanFactoryPostProcessor 的区别：
+	 * - BeanFactoryPostProcessor：在 Bean 实例化之前执行，操作 BeanDefinition
+	 * - BeanPostProcessor：在 Bean 实例化之后执行，操作 Bean 实例
+	 *
+	 * 执行时机：在 invokeBeanFactoryPostProcessors 之后，在 finishBeanFactoryInitialization 之前
+	 *
+	 * @param beanFactory 可配置的列表式 Bean 工厂
 	 */
 	protected void registerBeanPostProcessors(ConfigurableListableBeanFactory beanFactory) {
+		// 委托给 PostProcessorRegistrationDelegate 来处理 BeanPostProcessor 的注册
+		// 参数：
+		// 1. beanFactory - 当前的 Bean 工厂
+		// 2. this - 当前的 ApplicationContext（用于获取 BeanPostProcessor 的依赖）
 		PostProcessorRegistrationDelegate.registerBeanPostProcessors(beanFactory, this);
 	}
 
