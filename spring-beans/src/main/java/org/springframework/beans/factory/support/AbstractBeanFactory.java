@@ -1217,6 +1217,15 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	 * // 5. 如果需要获取FactoryBean本身，可以使用"&"前缀
 	 * @Autowired
 	 * private FactoryBean<UserMapper> &userMapper; // 获取MapperFactoryBean实例
+	 *
+	 * 1.工厂Bean在spring容器中一开始保存的是工厂本身
+	 * 2.第一次获取工厂bean（FactoryBean能产生的对象）
+	 * 3.Srping.getBean会在底层所有组件挨个遍历找到那个组件类型是工厂bean的
+	 * 4.找到工厂bean发现他是工厂，类型就被决定成Hello
+	 * 5.调用工厂方法（getObject()）创建工厂bean对象
+	 * 6.在容器中保存的名字
+	 * 7.普通单实例bean保存在singletonObject里面
+	 * 8.工厂产生的bean，缓存在factoryBeanCache；下一次直接从里面获取，所有工厂bean默认都是单实例
 	 */
 	@Override
 	public boolean isFactoryBean(String name) throws NoSuchBeanDefinitionException {
