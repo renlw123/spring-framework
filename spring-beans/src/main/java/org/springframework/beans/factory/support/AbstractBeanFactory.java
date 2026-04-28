@@ -1950,55 +1950,116 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	}
 
 	/**
-	 * Get the object for the given bean instance, either the bean
-	 * instance itself or its created object in case of a FactoryBean.
-	 * @param beanInstance the shared bean instance
-	 * @param name the name that may include factory dereference prefix
-	 * @param beanName the canonical bean name
-	 * @param mbd the merged bean definition
-	 * @return the object to expose for the bean
+	 * 获取给定 Bean 实例对应的对象，如果是 FactoryBean，则获取其生产的对象；
+	 * 如果是普通 Bean，则返回实例本身。
+	 *
+	 * <p><b>调用时机：</b>
+	 * 在 Bean 创建完成后，每次通过 getBean() 获取 Bean 实例时都会被调用。
+	 * 这是 Spring 处理 FactoryBean 的核心方法。
+	 *
+	 * <p><b>核心作用：</b>
+	 * 统一处理普通 Bean 和 FactoryBean 的区别：
+	 * <ul>
+	 *   <li>如果请求的是普通 Bean，直接返回实例</li>
+	 *   <li>如果请求的是 FactoryBean 本身（名称以 & 为前缀），返回 FactoryBean 实例</li>
+	 *   <li>如果请求的是 FactoryBean 生产的 Bean（名称不带 &），返回 FactoryBean.getObject() 的结果</li>
+	 * </ul>
+	 *
+	 * <p><b>名称约定：</b>
+	 * <pre>
+	 * Bean 名称格式             说明
+	 * "myFactoryBean"    → 获取 FactoryBean 生产的 Bean
+	 * "&myFactoryBean"   → 获取 FactoryBean 实例本身
+	 * </pre>
+	 *
+	 * <p><b>处理逻辑：</b>
+	 * <ol>
+	 *   <li>检查是否是 FactoryBean 解引用请求（名称带 &）</li>
+	 *   <li>如果不是 FactoryBean，直接返回实例</li>
+	 *   <li>如果是 FactoryBean，则获取或创建其生产的对象</li>
+	 * </ol>
+	 *
+	 * <p><b>缓存机制：</b>
+	 * <ul>
+	 *   <li>FactoryBean 生产的单例对象会被缓存，避免重复创建</li>
+	 *   <li>通过 factoryBeanObjectCache 缓存生产结果</li>
+	 * </ul>
+	 *
+	 * @param beanInstance 共享的 Bean 实例（可能是普通 Bean 或 FactoryBean）
+	 * @param name 请求的名称（可能包含工厂解引用前缀 &）
+	 * @param beanName 规范化的 Bean 名称（不带 & 前缀）
+	 * @param mbd 合并后的 Bean 定义（可能为 null）
+	 * @return 要暴露给调用方的对象
 	 */
 	protected Object getObjectForBeanInstance(
 			Object beanInstance, String name, String beanName, @Nullable RootBeanDefinition mbd) {
 
-		// Don't let calling code try to dereference the factory if the bean isn't a factory.
+		// ========== 第一段：处理 FactoryBean 解引用请求 ==========
+		// 判断名称是否以 "&" 开头（FactoryBean 解引用）
+		// 例如：getBean("&myFactoryBean") 表示要获取 FactoryBean 本身
 		if (BeanFactoryUtils.isFactoryDereference(name)) {
+			// 如果请求的是 NullBean，直接返回
 			if (beanInstance instanceof NullBean) {
 				return beanInstance;
 			}
+			// 如果实例不是 FactoryBean，抛出异常
+			// 说明用户想获取 FactoryBean 本身，但 beanInstance 却是普通 Bean
 			if (!(beanInstance instanceof FactoryBean)) {
 				throw new BeanIsNotAFactoryException(beanName, beanInstance.getClass());
 			}
+			// 标记 BeanDefinition 中的 isFactoryBean 标志
 			if (mbd != null) {
 				mbd.isFactoryBean = true;
 			}
+			// 直接返回 FactoryBean 实例本身
 			return beanInstance;
 		}
 
-		// Now we have the bean instance, which may be a normal bean or a FactoryBean.
-		// If it's a FactoryBean, we use it to create a bean instance, unless the
-		// caller actually wants a reference to the factory.
+		// ========== 第二段：处理普通 Bean 或 FactoryBean 生产的 Bean ==========
+		// 如果不是 FactoryBean，直接返回实例（普通 Bean）
 		if (!(beanInstance instanceof FactoryBean)) {
 			return beanInstance;
 		}
 
-		Object object = null;
+		// ========== 第三段：处理 FactoryBean 生产的 Bean ==========
+		// 执行到这里，说明：
+		// 1. 请求的不是 FactoryBean 本身（名称没有 & 前缀）
+		// 2. beanInstance 是 FactoryBean 实例
+		// 3. 需要调用 FactoryBean.getObject() 获取生产的 Bean
+
+		Object object = null;  // 用于存储 FactoryBean 生产的对象
+
+		// 标记 BeanDefinition
 		if (mbd != null) {
 			mbd.isFactoryBean = true;
 		}
 		else {
+			// 如果没有提供 BeanDefinition，尝试从缓存中获取 FactoryBean 生产的对象
+			// 缓存位置：factoryBeanObjectCache（DefaultSingletonBeanRegistry 中）
 			object = getCachedObjectForFactoryBean(beanName);
 		}
+
+		// 如果缓存中没有，则创建生产对象
 		if (object == null) {
-			// Return bean instance from factory.
+			// 强转为 FactoryBean
 			FactoryBean<?> factory = (FactoryBean<?>) beanInstance;
-			// Caches object obtained from FactoryBean if it is a singleton.
+
+			// 如果是单例 FactoryBean，需要获取 BeanDefinition 以判断是否是合成类
 			if (mbd == null && containsBeanDefinition(beanName)) {
 				mbd = getMergedLocalBeanDefinition(beanName);
 			}
+
+			// 判断是否是合成类（Synthetic），合成类不需要进行某些后置处理
 			boolean synthetic = (mbd != null && mbd.isSynthetic());
+
+			// 从 FactoryBean 获取对象
+			// 这个方法内部会处理：
+			// - 调用 FactoryBean.getObject()
+			// - 如果是单例，会缓存在 factoryBeanObjectCache 中
+			// - 应用 FactoryBeanPostProcessor 后置处理器
 			object = getObjectFromFactoryBean(factory, beanName, !synthetic);
 		}
+
 		return object;
 	}
 
