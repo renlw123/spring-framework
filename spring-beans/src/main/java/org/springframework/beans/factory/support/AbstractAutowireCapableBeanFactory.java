@@ -462,18 +462,40 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		return result;
 	}
 
+	/**
+	 * 将 BeanPostProcessor 应用于给定的现有 Bean 实例，调用它们的
+	 * {@code postProcessAfterInitialization} 方法。
+	 * <p>该方法在 Bean 初始化完成后被调用，允许后处理器对 Bean 实例进行最后的处理，
+	 * 例如生成代理对象、进行包装或修改等。
+	 *
+	 * @param existingBean 现有的 Bean 实例（已经完成属性注入和初始化方法调用）
+	 * @param beanName Bean 的名称
+	 * @return 处理后的 Bean 实例（可能是原始对象，也可能是包装后的对象）
+	 * @throws BeansException 如果处理过程中发生错误
+	 */
 	@Override
 	public Object applyBeanPostProcessorsAfterInitialization(Object existingBean, String beanName)
 			throws BeansException {
 
+		// 将当前处理结果初始化为原始 Bean 实例
 		Object result = existingBean;
+
+		// 遍历容器中所有的 BeanPostProcessor
+		// 注意：这里获取的是完整的 BeanPostProcessor 列表，而不仅仅是某种特定类型
 		for (BeanPostProcessor processor : getBeanPostProcessors()) {
+			// 调用后处理器的 postProcessAfterInitialization 方法
+			// 这允许每个处理器对 Bean 进行后置处理（如生成代理、包装、修改属性等）
 			Object current = processor.postProcessAfterInitialization(result, beanName);
+
+			// 如果某个处理器返回了 null，这是一个重要的信号
+			// 表示该处理器不希望继续处理，立即返回当前结果，不再调用后续处理器
 			if (current == null) {
 				return result;
 			}
+			// 将返回的结果作为下一次处理的输入（支持链式处理）
 			result = current;
 		}
+		// 所有处理器都执行完毕，返回最终的处理结果
 		return result;
 	}
 
@@ -1155,24 +1177,48 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 	/**
 	 * Apply before-instantiation post-processors, resolving whether there is a
 	 * before-instantiation shortcut for the specified bean.
+	 * 应用实例化前的后处理器，判断指定 bean 是否存在实例化前快捷方式。
+	 * <p>
+	 * 这个方法允许 BeanPostProcessor 在 Bean 实际实例化之前返回一个代理对象，
+	 * 从而跳过正常的实例化、属性注入和初始化流程。这是 AOP 等高级特性的关键扩展点。
+	 *
 	 * @param beanName the name of the bean
+	 *              bean 的名称
 	 * @param mbd the bean definition for the bean
+	 *              bean 的 BeanDefinition 对象
 	 * @return the shortcut-determined bean instance, or {@code null} if none
+	 *         快捷方式确定的 bean 实例，如果没有则返回 {@code null}
 	 */
 	@Nullable
 	protected Object resolveBeforeInstantiation(String beanName, RootBeanDefinition mbd) {
 		Object bean = null;
+
+		// 检查 beforeInstantiationResolved 标志
+		// 这个标志用于缓存该 bean 是否已经尝试过实例化前处理
+		//  - null: 未尝试过
+		//  - true: 之前已经成功创建了快捷方式对象
+		//  - false: 之前尝试过但没有创建快捷方式对象
 		if (!Boolean.FALSE.equals(mbd.beforeInstantiationResolved)) {
-			// Make sure bean class is actually resolved at this point.
+			// 条件1: bean 不是合成 bean（合成 bean 是框架内部生成的，如 Spring AOP 相关的基础设施）
+			// 条件2: 存在实现了 InstantiationAwareBeanPostProcessor 的后处理器
 			if (!mbd.isSynthetic() && hasInstantiationAwareBeanPostProcessors()) {
+				// 确定目标类型（可能经过 FactoryBean 等处理后的实际类型）
 				Class<?> targetType = determineTargetType(beanName, mbd);
 				if (targetType != null) {
+					// 步骤1: 应用实例化前的后处理器（postProcessBeforeInstantiation）
+					// 这是最早期的扩展点，允许完全替换掉 Bean 的实例
 					bean = applyBeanPostProcessorsBeforeInstantiation(targetType, beanName);
+
 					if (bean != null) {
+						// 步骤2: 如果前置处理器返回了对象（非 null），
+						// 立即应用初始化后的后处理器（postProcessAfterInitialization）
+						// 注意：此时会跳过正常的实例化、属性注入、初始化阶段
 						bean = applyBeanPostProcessorsAfterInitialization(bean, beanName);
 					}
 				}
 			}
+			// 缓存结果：如果 bean 不为 null，说明快捷方式已创建，设置为 true
+			// 如果 bean 为 null，说明没有快捷方式，设置为 false，避免重复尝试
 			mbd.beforeInstantiationResolved = (bean != null);
 		}
 		return bean;
@@ -1184,19 +1230,36 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 	 * <p>Any returned object will be used as the bean instead of actually instantiating
 	 * the target bean. A {@code null} return value from the post-processor will
 	 * result in the target bean being instantiated.
+	 * 将 InstantiationAwareBeanPostProcessor 应用于指定的 bean 定义（通过类和名称），
+	 * 调用它们的 {@code postProcessBeforeInstantiation} 方法。
+	 * <p>任何返回的非空对象将被用作 bean 实例，而不会实际实例化目标 bean。
+	 * 后处理器返回 {@code null} 值将导致目标 bean 被正常实例化。
+	 *
 	 * @param beanClass the class of the bean to be instantiated
+	 *                  要实例化的 bean 的 Class 对象
 	 * @param beanName the name of the bean
+	 *                  bean 的名称
 	 * @return the bean object to use instead of a default instance of the target bean, or {@code null}
+	 *         用于替代目标 bean 默认实例的 bean 对象，如果没有则返回 {@code null}
 	 * @see InstantiationAwareBeanPostProcessor#postProcessBeforeInstantiation
 	 */
 	@Nullable
 	protected Object applyBeanPostProcessorsBeforeInstantiation(Class<?> beanClass, String beanName) {
+		// 遍历所有 InstantiationAwareBeanPostProcessor（实例化感知的 Bean 后处理器）
+		// 从后处理器缓存中获取，避免每次重新获取，提升性能
 		for (InstantiationAwareBeanPostProcessor bp : getBeanPostProcessorCache().instantiationAware) {
+			// 调用后处理器的 postProcessBeforeInstantiation 方法
+			// 这是 Bean 生命周期中最早的扩展点，在实例化之前触发
 			Object result = bp.postProcessBeforeInstantiation(beanClass, beanName);
+
 			if (result != null) {
+				// 一旦某个后处理器返回了非空对象，立即返回该对象
+				// 注意：后续的后处理器不会再被调用（短路逻辑）
+				// 返回的对象将完全替代 Spring 正常的 Bean 创建流程
 				return result;
 			}
 		}
+		// 所有后处理器都返回 null，继续正常的 Bean 创建流程
 		return null;
 	}
 
