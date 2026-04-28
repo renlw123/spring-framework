@@ -433,11 +433,53 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 
 	/**
 	 * 应用所有已注册的 BeanPostProcessor 的 postProcessBeforeInitialization 方法。
-	 * 在 Bean 初始化方法（@PostConstruct、afterPropertiesSet、init-method）调用之前执行。
 	 *
-	 * @param existingBean 现有的 bean 实例
+	 * <p><b>执行时机：</b>Bean 实例化完成、依赖注入完成后，在 Bean 初始化方法之前调用。
+	 *
+	 * <p><b>调用链：</b>
+	 * <pre>
+	 * doCreateBean
+	 *   → 实例化对象
+	 *   → 依赖注入
+	 *   → populateBean
+	 *   → initializeBean (当前方法在此被调用)
+	 *       → applyBeanPostProcessorsBeforeInitialization  ← 当前位置
+	 *       → invokeInitMethods (PostConstruct, afterPropertiesSet, init-method)
+	 *       → applyBeanPostProcessorsAfterInitialization
+	 * </pre>
+	 *
+	 * <p><b>核心作用：</b>
+	 * <ul>
+	 *   <li>允许在 Bean 初始化方法执行前对 Bean 实例进行修改、包装或增强</li>
+	 *   <li>可以返回代理对象，替代原始 Bean 实例</li>
+	 *   <li>多个 BeanPostProcessor 会按顺序链式处理，每个处理器的输出作为下一个的输入</li>
+	 * </ul>
+	 *
+	 * <p><b>返回值规则：</b>
+	 * <ul>
+	 *   <li>返回非 null：继续传递到下一个处理器，最终作为 Bean 的最终实例</li>
+	 *   <li>返回 null：<b>立即终止处理</b>，直接返回之前的处理结果，后续处理器不再执行</li>
+	 * </ul>
+	 *
+	 * <p><b>典型应用场景：</b>
+	 * <ul>
+	 *   <li><b>ApplicationContextAware 注入</b>：ApplicationContextAwareProcessor 在此设置 ApplicationContext</li>
+	 *   <li><b>自定义注解处理</b>：处理 @PostConstruct 以外的初始化注解</li>
+	 *   <li><b>Bean 验证</b>：在初始化前检查 Bean 状态</li>
+	 *   <li><b>代理生成</b>：某些场景下在此生成代理对象（通常 AOP 在 after 阶段更常见）</li>
+	 * </ul>
+	 *
+	 * <p><b>注意事项：</b>
+	 * <ul>
+	 *   <li>此时 Bean 的属性已经注入完成（@Autowired、@Resource 等已生效）</li>
+	 *   <li>Bean 的初始化方法（@PostConstruct、afterPropertiesSet、init-method）尚未执行</li>
+	 *   <li>如果多个处理器，任何一个返回 null 都会导致后续处理器被跳过</li>
+	 *   <li>这个方法属于标准的 BeanPostProcessor 接口，区别于 InstantiationAwareBeanPostProcessor</li>
+	 * </ul>
+	 *
+	 * @param existingBean 现有的 bean 实例（已经完成依赖注入）
 	 * @param beanName bean 的名称
-	 * @return 处理后的 bean 实例（可能被包装或替换），如果任何处理器返回 null 则提前返回
+	 * @return 处理后的 bean 实例（可能被包装、增强或替换），如果任何处理器返回 null 则返回之前的结果
 	 * @throws BeansException 如果处理失败
 	 */
 	@Override
@@ -446,17 +488,26 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 
 		Object result = existingBean;
 
-		// 遍历所有已注册的 BeanPostProcessor
+		// 遍历所有已注册的 BeanPostProcessor（按优先级排序）
+		// 常见实现类：ApplicationContextAwareProcessor、ConfigurationPropertiesBindingPostProcessor 等
 		for (BeanPostProcessor processor : getBeanPostProcessors()) {
 			// 调用当前处理器的 postProcessBeforeInitialization 方法
+			// 处理器此时可以：
+			// 1. 修改传入的 bean 实例的任意属性
+			// 2. 包装 bean 实例（如返回代理对象）
+			// 3. 完全替换 bean 实例
+			// 4. 对 bean 进行验证或额外初始化
 			Object current = processor.postProcessBeforeInitialization(result, beanName);
 
-			// 如果返回 null，则立即返回当前结果，不再继续处理
-			// 返回 null 通常意味着该处理器想要阻止后续处理器的执行
+			// 返回 null 是一种"短路"机制
+			// 通常用于：处理器遇到错误、或者某个条件不满足需要终止后续处理
+			// 注意：实际 Spring 源码中很少返回 null，但接口允许这样做
 			if (current == null) {
+				// 立即返回当前结果，不再执行剩余的处理器
 				return result;
 			}
 			// 更新 result，作为下一个处理器的输入
+			// 这样链式调用可以让多个处理器对同一个 bean 进行多次增强
 			result = current;
 		}
 		return result;
