@@ -2100,25 +2100,111 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 	}
 
 	/**
-	 * Give a bean a chance to react now all its properties are set,
-	 * and a chance to know about its owning bean factory (this object).
-	 * This means checking whether the bean implements InitializingBean or defines
-	 * a custom init method, and invoking the necessary callback(s) if it does.
-	 * @param beanName the bean name in the factory (for debugging purposes)
-	 * @param bean the new bean instance we may need to initialize
-	 * @param mbd the merged bean definition that the bean was created with
-	 * (can also be {@code null}, if given an existing bean instance)
-	 * @throws Throwable if thrown by init methods or by the invocation process
+	 * 在 Bean 的所有属性都被设置之后，给予 Bean 一个反应的机会，
+	 * 并让它有机会了解其所属的 BeanFactory。
+	 *
+	 * <p><b>调用时机：</b>
+	 * 在 {@link #applyBeanPostProcessorsBeforeInitialization} 之后，
+	 * {@link #applyBeanPostProcessorsAfterInitialization} 之前执行。
+	 *
+	 * <p><b>这是第6个扩展点的触发位置</b>，但注意：这个方法本身不是扩展点，
+	 * 而是 Spring 内部调用初始化方法的地方。真正的第6个扩展点是
+	 * {@link BeanPostProcessor#postProcessAfterInitialization}。
+	 *
+	 * <p><b>初始化方法的调用顺序：</b>
+	 * <ol>
+	 *   <li>{@link javax.annotation.PostConstruct} 注解的方法（通过 CommonAnnotationBeanPostProcessor）</li>
+	 *   <li>{@link InitializingBean#afterPropertiesSet()} 方法（当前方法处理）</li>
+	 *   <li>自定义 init-method（当前方法处理）</li>
+	 * </ol>
+	 *
+	 * <p><b>执行流程详解：</b>
+	 * <pre>
+	 * initializeBean
+	 *   → applyBeanPostProcessorsBeforeInitialization  ← 第5个扩展点
+	 *   → invokeInitMethods（当前位置）                ← 执行初始化方法
+	 *       → 1. 检查是否是 InitializingBean
+	 *          → 如果是，调用 afterPropertiesSet()
+	 *       → 2. 检查是否有自定义 init-method
+	 *          → 如果有且与 afterPropertiesSet 不重复，调用自定义初始化方法
+	 *   → applyBeanPostProcessorsAfterInitialization   ← 第6个扩展点
+	 * </pre>
+	 *
+	 * <p><b>方法内部逻辑：</b>
+	 * <ul>
+	 *   <li><b>第一阶段</b>：处理 InitializingBean 接口的 afterPropertiesSet() 方法
+	 *       <ul>
+	 *         <li>只有实现了 InitializingBean 接口的 Bean 才会执行</li>
+	 *         <li>需要检查该初始化方法是否被外部管理（避免重复执行）</li>
+	 *         <li>支持 SecurityManager 环境下的特权执行</li>
+	 *       </ul>
+	 *   </li>
+	 *   <li><b>第二阶段</b>：处理自定义 init-method
+	 *       <ul>
+	 *         <li>从 BeanDefinition 中获取配置的 init-method 名称</li>
+	 *         <li>如果 init-method 就是 afterPropertiesSet，则跳过（避免重复调用）</li>
+	 *         <li>检查该方法是否已被外部管理（如通过注解处理器）</li>
+	 *         <li>通过反射调用自定义初始化方法</li>
+	 *       </ul>
+	 *   </li>
+	 * </ul>
+	 *
+	 * <p><b>典型示例：</b>
+	 * <pre>{@code
+	 * // 方式1：实现 InitializingBean 接口
+	 * @Component
+	 * public class MyBean implements InitializingBean {
+	 *     @Override
+	 *     public void afterPropertiesSet() throws Exception {
+	 *         System.out.println("1. afterPropertiesSet 执行");
+	 *     }
+	 * }
+	 *
+	 * // 方式2：配置 init-method
+	 * @Component
+	 * public class AnotherBean {
+	 *     public void customInit() {
+	 *         System.out.println("2. 自定义 init-method 执行");
+	 *     }
+	 * }
+	 * // XML 配置：<bean id="anotherBean" class="AnotherBean" init-method="customInit"/>
+	 *
+	 * // 方式3：@PostConstruct（优先级最高）
+	 * @Component
+	 * public class ThirdBean {
+	 *     @PostConstruct
+	 *     public void postConstruct() {
+	 *         System.out.println("0. @PostConstruct 最先执行");
+	 *     }
+	 * }
+	 * }</pre>
+	 *
+	 * <p><b>注意事项：</b>
+	 * <ul>
+	 *   <li>@PostConstruct 的调用不在此方法中，而是在 CommonAnnotationBeanPostProcessor 的
+	 *       postProcessBeforeInitialization 中执行（第5个扩展点）</li>
+	 *   <li>此方法中抛出的任何异常都会导致 Bean 创建失败</li>
+	 *   <li>如果 Bean 的 afterPropertiesSet() 和 init-method 配置了相同的方法名，不会重复调用</li>
+	 *   <li>mbd 参数可能为 null（当传入的是已存在的 Bean 实例时）</li>
+	 * </ul>
+	 *
+	 * @param beanName 工厂中的 bean 名称（用于调试）
+	 * @param bean 需要初始化的新 bean 实例
+	 * @param mbd 创建 bean 时使用的合并后的 bean 定义（如果传入的是已存在的 bean 实例，可能为 null）
+	 * @throws Throwable 如果初始化方法或调用过程抛出异常
 	 * @see #invokeCustomInitMethod
 	 */
 	protected void invokeInitMethods(String beanName, Object bean, @Nullable RootBeanDefinition mbd)
 			throws Throwable {
 
+		// ========== 第一阶段：处理 InitializingBean 接口 ==========
 		boolean isInitializingBean = (bean instanceof InitializingBean);
 		if (isInitializingBean && (mbd == null || !mbd.hasAnyExternallyManagedInitMethod("afterPropertiesSet"))) {
 			if (logger.isTraceEnabled()) {
 				logger.trace("Invoking afterPropertiesSet() on bean with name '" + beanName + "'");
 			}
+
+			// 处理 SecurityManager 环境
 			if (System.getSecurityManager() != null) {
 				try {
 					AccessController.doPrivileged((PrivilegedExceptionAction<Object>) () -> {
@@ -2131,15 +2217,20 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 				}
 			}
 			else {
+				// 正常情况：直接调用 afterPropertiesSet 方法
 				((InitializingBean) bean).afterPropertiesSet();
 			}
 		}
 
+		// ========== 第二阶段：处理自定义 init-method ==========
 		if (mbd != null && bean.getClass() != NullBean.class) {
 			String initMethodName = mbd.getInitMethodName();
 			if (StringUtils.hasLength(initMethodName) &&
+					// 避免与 afterPropertiesSet 重复调用
 					!(isInitializingBean && "afterPropertiesSet".equals(initMethodName)) &&
+					// 检查该方法是否已经被外部管理（如通过注解）
 					!mbd.hasAnyExternallyManagedInitMethod(initMethodName)) {
+				// 通过反射调用自定义初始化方法
 				invokeCustomInitMethod(beanName, bean, mbd);
 			}
 		}
