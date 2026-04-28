@@ -108,28 +108,53 @@ public interface InstantiationAwareBeanPostProcessor extends BeanPostProcessor {
 	}
 
 	/**
-	 * Post-process the given property values before the factory applies them
-	 * to the given bean, without any need for property descriptors.
-	 * <p>Implementations should return {@code null} (the default) if they provide a custom
-	 * {@link #postProcessPropertyValues} implementation, and {@code pvs} otherwise.
-	 * In a future version of this interface (with {@link #postProcessPropertyValues} removed),
-	 * the default implementation will return the given {@code pvs} as-is directly.
-	 * @param pvs the property values that the factory is about to apply (never {@code null})
-	 * @param bean the bean instance created, but whose properties have not yet been set
-	 * @param beanName the name of the bean
-	 * @return the actual property values to apply to the given bean (can be the passed-in
-	 * PropertyValues instance), or {@code null} which proceeds with the existing properties
-	 * but specifically continues with a call to {@link #postProcessPropertyValues}
-	 * (requiring initialized {@code PropertyDescriptor}s for the current bean class)
-	 * @throws org.springframework.beans.BeansException in case of errors
+	 * 在工厂将属性值应用到 bean 之前，对属性值进行后置处理。
+	 *
+	 * <p><b>调用时机：</b>
+	 * 在 postProcessAfterInstantiation 返回 true 之后，Spring 进行依赖注入之前
+	 *
+	 * <p><b>返回值含义：</b>
+	 * <ul>
+	 *   <li>返回 {@code PropertyValues}：使用返回的属性值进行注入（替换原有的 pvs）</li>
+	 *   <li>返回 {@code null}（默认）：回退到旧的 {@link #postProcessPropertyValues} 方法，
+	 *       该方法需要 PropertyDescriptor 信息</li>
+	 * </ul>
+	 *
+	 * <p><b>核心作用：</b>
+	 * 这是 Spring 5.1+ 推荐的自定义属性注入方式，用于替代过时的 {@code postProcessPropertyValues}
+	 *
+	 * <p><b>典型应用场景：</b>
+	 * <ul>
+	 *   <li><b>@Autowired 注入</b>：AutowiredAnnotationBeanPostProcessor 在此方法中
+	 *       完成所有 @Autowired、@Value 等注解的注入</li>
+	 *   <li><b>@Resource 注入</b>：CommonAnnotationBeanPostProcessor 在此完成
+	 *        @Resource 注解的注入</li>
+	 *   <li><b>自定义注解注入</b>：实现自定义的属性注入逻辑</li>
+	 *   <li><b>属性值转换/过滤</b>：对即将注入的值进行修改、转换或验证</li>
+	 * </ul>
+	 *
+	 * <p><b>调用条件：</b>
+	 * 只有 {@link #postProcessAfterInstantiation} 返回 true 时才会调用此方法
+	 *
+	 * <p><b>注意事项：</b>
+	 * <ul>
+	 *   <li>此方法是 {@code postProcessPropertyValues} 的现代替代品，无需 PropertyDescriptor</li>
+	 *   <li>返回 null 会触发旧版 {@code postProcessPropertyValues} 的调用（为了向后兼容）</li>
+	 *   <li>在此方法中可以直接修改 bean 的属性值，无需返回 PropertyValues</li>
+	 *   <li>执行顺序在 Spring 自动装配之前</li>
+	 * </ul>
+	 *
+	 * @param pvs 工厂将要应用的属性值（永远不会为 null）
+	 * @param bean 已创建的 bean 实例，属性尚未被设置
+	 * @param beanName bean 的名称
+	 * @return 实际要应用到此 bean 的属性值，可以返回传入的 PropertyValues 实例；
+	 *         返回 null 表示继续使用现有属性，但会调用 postProcessPropertyValues 方法
 	 * @since 5.1
-	 * @see #postProcessPropertyValues
 	 */
 	@Nullable
 	default PropertyValues postProcessProperties(PropertyValues pvs, Object bean, String beanName)
 			throws BeansException {
-
-		return null;
+		return null;  // 默认返回 null，会回退到旧的 postProcessPropertyValues 方法
 	}
 
 	/**
