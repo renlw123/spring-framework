@@ -514,39 +514,106 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 	}
 
 	/**
-	 * 将 BeanPostProcessor 应用于给定的现有 Bean 实例，调用它们的
-	 * {@code postProcessAfterInitialization} 方法。
-	 * <p>该方法在 Bean 初始化完成后被调用，允许后处理器对 Bean 实例进行最后的处理，
-	 * 例如生成代理对象、进行包装或修改等。
+	 * 应用所有已注册的 BeanPostProcessor 的 postProcessAfterInitialization 方法。
 	 *
-	 * @param existingBean 现有的 Bean 实例（已经完成属性注入和初始化方法调用）
+	 * <p><b>执行时机：</b>
+	 * 在 Bean 的所有初始化方法完成之后调用，是 Bean 生命周期的最后一个处理阶段。
+	 *
+	 * <p><b>调用链路：</b>
+	 * <pre>
+	 * AbstractAutowireCapableBeanFactory.initializeBean()
+	 *   → 1. applyBeanPostProcessorsBeforeInitialization()  ← 第5个扩展点
+	 *   → 2. invokeInitMethods()                            ← 执行初始化方法
+	 *        → @PostConstruct
+	 *        → afterPropertiesSet()
+	 *        → init-method
+	 *   → 3. <b>applyBeanPostProcessorsAfterInitialization()</b> ← 第6个扩展点（当前位置）
+	 * </pre>
+	 *
+	 * <p><b>核心作用：</b>
+	 * <ul>
+	 *   <li><b>AOP 代理生成</b>：这是 Spring AOP 创建代理对象的默认位置。
+	 *       {@link AbstractAutoProxyCreator} 在此方法中检查并创建代理</li>
+	 *   <li><b>最终包装</b>：对完全初始化的 Bean 进行最后的包装或增强</li>
+	 *   <li><b>验证与记录</b>：在 Bean 完全就绪后进行最终验证或日志记录</li>
+	 * </ul>
+	 *
+	 * <p><b>与 postProcessBeforeInitialization 的区别：</b>
+	 * <ul>
+	 *   <li>Before：在初始化方法执行前调用，此时 Bean 属性已注入但未初始化</li>
+	 *   <li>After：在初始化方法执行后调用，此时 Bean 已经完全就绪</li>
+	 * </ul>
+	 *
+	 * <p><b>返回值规则：</b>
+	 * <ul>
+	 *   <li>返回非 null：继续传递到下一个处理器，最终作为 Bean 的最终实例</li>
+	 *   <li>返回 null：<b>立即终止处理</b>，直接返回之前的处理结果，后续处理器不再执行</li>
+	 * </ul>
+	 *
+	 * <p><b>典型实现示例：</b>
+	 * <pre>{@code
+	 * // Spring AOP 的核心实现（简化版）
+	 * public class AbstractAutoProxyCreator extends ProxyProcessorSupport
+	 *         implements BeanPostProcessor {
+	 *
+	 *     @Override
+	 *     public Object postProcessAfterInitialization(Object bean, String beanName) {
+	 *         if (isInfrastructureClass(bean.getClass())) {
+	 *             return bean;
+	 *         }
+	 *
+	 *         // 检查是否需要代理
+	 *         Object[] specificInterceptors = getAdvicesAndAdvisorsForBean(bean.getClass(), beanName, null);
+	 *         if (specificInterceptors != DO_NOT_PROXY) {
+	 *             // 创建代理对象
+	 *             return createProxy(bean.getClass(), beanName, specificInterceptors);
+	 *         }
+	 *         return bean;
+	 *     }
+	 * }
+	 * }</pre>
+	 *
+	 * <p><b>注意事项：</b>
+	 * <ul>
+	 *   <li>此方法是 Bean 生命周期中<b>最后一个扩展点</b>（第6个）</li>
+	 *   <li>在此之后，Bean 就会被放入一级缓存（singletonObjects）中供应用程序使用</li>
+	 *   <li>如果多个处理器，任何一个返回 null 都会导致后续处理器被跳过</li>
+	 *   <li>返回的最终结果将作为 Bean 的实际实例（可能是原始对象，也可能是代理对象）</li>
+	 * </ul>
+	 *
+	 * @param existingBean 现有的 Bean 实例（已完成属性注入和初始化方法调用）
 	 * @param beanName Bean 的名称
-	 * @return 处理后的 Bean 实例（可能是原始对象，也可能是包装后的对象）
+	 * @return 处理后的 Bean 实例，可能是原始对象或包装后的对象（如代理）
 	 * @throws BeansException 如果处理过程中发生错误
 	 */
 	@Override
 	public Object applyBeanPostProcessorsAfterInitialization(Object existingBean, String beanName)
 			throws BeansException {
 
-		// 将当前处理结果初始化为原始 Bean 实例
 		Object result = existingBean;
 
-		// 遍历容器中所有的 BeanPostProcessor
-		// 注意：这里获取的是完整的 BeanPostProcessor 列表，而不仅仅是某种特定类型
+		// 遍历所有已注册的 BeanPostProcessor
+		// 注意：getBeanPostProcessors() 返回的是按优先级排序的列表
+		// 优先级高的处理器会先执行
 		for (BeanPostProcessor processor : getBeanPostProcessors()) {
 			// 调用后处理器的 postProcessAfterInitialization 方法
-			// 这允许每个处理器对 Bean 进行后置处理（如生成代理、包装、修改属性等）
+			// 对于 AOP 场景，此时会判断是否需要创建代理对象
 			Object current = processor.postProcessAfterInitialization(result, beanName);
 
-			// 如果某个处理器返回了 null，这是一个重要的信号
-			// 表示该处理器不希望继续处理，立即返回当前结果，不再调用后续处理器
+			// 短路机制：如果某个处理器返回 null，立即停止处理
+			// 返回 null 通常表示发生错误或需要终止后续处理
+			// 注意：标准实现中极少返回 null，但接口允许这样做
 			if (current == null) {
 				return result;
 			}
-			// 将返回的结果作为下一次处理的输入（支持链式处理）
+			// 链式处理：将当前处理器的输出作为下一个处理器的输入
+			// 这样的设计允许多个处理器对同一个 Bean 进行多次增强
 			result = current;
 		}
-		// 所有处理器都执行完毕，返回最终的处理结果
+
+		// 返回最终处理结果
+		// 对于普通的 Bean，返回原始对象
+		// 对于需要 AOP 的 Bean，返回代理对象（由 AbstractAutoProxyCreator 创建）
 		return result;
 	}
 
