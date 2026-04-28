@@ -197,16 +197,80 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 	}
 
 	/**
-	 * Add the given singleton object to the singleton cache of this factory.
-	 * <p>To be called for eager registration of singletons.
-	 * @param beanName the name of the bean
-	 * @param singletonObject the singleton object
+	 * 将给定的单例对象添加到工厂的单例缓存中。
+	 * <p>用于单例的提前注册（eager registration）。
+	 *
+	 * <p><b>调用时机：</b>
+	 * 在 Bean 完全创建完成后（包括实例化、属性填充、初始化、所有后置处理器执行完毕），
+	 * 且 afterSingletonCreation 执行之后，finally 块的最后一步调用。
+	 *
+	 * <p><b>核心作用：</b>
+	 * 将完全初始化好的 Bean 放入一级缓存（singletonObjects），
+	 * 同时清理其他各级缓存中的临时数据。
+	 *
+	 * <p><b>Spring 三级缓存机制：</b>
+	 * <pre>
+	 * 1. singletonObjects       （一级缓存）Map：完全初始化好的单例 Bean
+	 * 2. earlySingletonObjects  （二级缓存）Map：提前暴露的早期 Bean（未完成属性填充）
+	 * 3. singletonFactories     （三级缓存）Map：单例工厂，用于生成早期引用
+	 * </pre>
+	 *
+	 * <p><b>操作方法：</b>
+	 * <ul>
+	 *   <li>{@link #getSingleton(String)} - 从一级缓存获取 Bean</li>
+	 *   <li>{@link #addSingleton(String, Object)} - 将完成的 Bean 放入一级缓存（当前方法）</li>
+	 *   <li>{@link #addSingletonFactory(String, ObjectFactory)} - 添加三级缓存工厂</li>
+	 *   <li>{@link #getSingleton(String, boolean)} - 允许检查早期引用的获取</li>
+	 * </ul>
+	 *
+	 * <p><b>缓存状态转换：</b>
+	 * <pre>
+	 * 创建前：所有缓存中都没有该 Bean
+	 *   ↓
+	 * 实例化后：addSingletonFactory → 放入三级缓存（singletonFactories）
+	 *   ↓
+	 * 循环依赖检测到时：从三级缓存移至二级缓存（earlySingletonObjects）
+	 *   ↓
+	 * 完全创建完成后：<b>addSingleton → 放入一级缓存，清理二、三级缓存</b>
+	 * </pre>
+	 *
+	 * <p><b>为什么要清理其他缓存：</b>
+	 * <ul>
+	 *   <li><b>singletonFactories.remove()</b>：工厂已完成使命，不再需要提前生成代理</li>
+	 *   <li><b>earlySingletonObjects.remove()</b>：早期引用已被最终版本替代</li>
+	 *   <li><b>registeredSingletons.add()</b>：记录已注册的单例名称，用于管理</li>
+	 * </ul>
+	 *
+	 * <p><b>线程安全：</b>
+	 * 使用 synchronized 锁住 singletonObjects，确保在多线程环境下的缓存操作原子性。
+	 * 这是防止并发问题的重要保障。
+	 *
+	 * @param beanName Bean 的名称
+	 * @param singletonObject 完全初始化完成的单例对象（最终版本）
+	 * @see #getSingleton
+	 * @see #addSingletonFactory
+	 * @see DefaultSingletonBeanRegistry#singletonObjects
 	 */
 	protected void addSingleton(String beanName, Object singletonObject) {
+		// 使用 synchronized 确保缓存操作的原子性
+		// 锁对象是 singletonObjects（一级缓存）
 		synchronized (this.singletonObjects) {
+			// 1️⃣ 将完全初始化好的 Bean 放入一级缓存
+			// 这是最终给 getBean() 返回的对象
 			this.singletonObjects.put(beanName, singletonObject);
+
+			// 2️⃣ 移除三级缓存中的工厂
+			// 工厂的作用是提前生成 Bean 的早期引用，现在已经完成使命
+			// 清理可以释放内存，避免不必要的引用
 			this.singletonFactories.remove(beanName);
+
+			// 3️⃣ 移除二级缓存中的早期引用
+			// 早期引用是在循环依赖时从三级缓存提升过来的
+			// 现在已经有了最终版本，需要移除早期引用
 			this.earlySingletonObjects.remove(beanName);
+
+			// 4️⃣ 记录已注册的单例名称
+			// 用于管理和追踪所有已注册的单例 Bean
 			this.registeredSingletons.add(beanName);
 		}
 	}
