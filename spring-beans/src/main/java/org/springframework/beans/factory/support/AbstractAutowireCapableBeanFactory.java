@@ -1161,15 +1161,51 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 	}
 
 	/**
-	 * Apply MergedBeanDefinitionPostProcessors to the specified bean definition,
-	 * invoking their {@code postProcessMergedBeanDefinition} methods.
-	 * @param mbd the merged bean definition for the bean
-	 * @param beanType the actual type of the managed bean instance
-	 * @param beanName the name of the bean
+	 * 应用所有 MergedBeanDefinitionPostProcessor 到指定的 bean 定义上，
+	 * 调用它们的 {@code postProcessMergedBeanDefinition} 方法。
+	 *
+	 * <p><b>调用时机：</b>在 Bean 实例化之前，但在 BeanDefinition 合并完成之后
+	 * （位于 doCreateBean 方法内，实例化代码执行之前）
+	 *
+	 * <p><b>主要用途：</b>
+	 * <ul>
+	 *   <li>允许 PostProcessor 在 Bean 实例化之前，对合并后的 BeanDefinition 进行元数据的检查和修改
+	 *   <li>可以提前解析并缓存 Bean 的某些元信息（如依赖的注解、需要注入的属性等）
+	 *   <li>典型的应用：@Autowired、@Resource、@Value 等注解的解析就发生在这里
+	 * </ul>
+	 *
+	 * <p><b>与其他扩展点的顺序：</b>
+	 * <ol>
+	 *   <li>postProcessBeforeInstantiation (最早，在 resolveBeforeInstantiation 中调用)</li>
+	 *   <li><b>postProcessMergedBeanDefinition (当前方法，在 doCreateBean 开头调用)</b></li>
+	 *   <li>实例化构造函数执行</li>
+	 *   <li>依赖注入（属性填充）</li>
+	 *   <li>postProcessBeforeInitialization</li>
+	 *   <li>初始化方法</li>
+	 *   <li>postProcessAfterInitialization</li>
+	 * </ol>
+	 *
+	 * <p><b>注意事项：</b>
+	 * <ul>
+	 *   <li>这里的 BeanDefinition 是合并后的 RootBeanDefinition（已经处理了父定义）
+	 *   <li>此时 Bean 实例尚未创建，只能操作 Bean 的元数据定义，不能操作实例
+	 *   <li>同一个 bean 定义只会被处理一次（在第一次实例化时）
+	 * </ul>
+	 *
+	 * @param mbd 合并后的 bean 定义（RootBeanDefinition 类型）
+	 * @param beanType 实际管理的 bean 实例类型（可能是一个 Class，也可能是 null）
+	 * @param beanName bean 的名称
 	 * @see MergedBeanDefinitionPostProcessor#postProcessMergedBeanDefinition
 	 */
 	protected void applyMergedBeanDefinitionPostProcessors(RootBeanDefinition mbd, Class<?> beanType, String beanName) {
+		// 从缓存中获取所有 MergedBeanDefinitionPostProcessor 类型的处理器
+		// getBeanPostProcessorCache().mergedDefinition 是在容器启动时就分类缓存好的
 		for (MergedBeanDefinitionPostProcessor processor : getBeanPostProcessorCache().mergedDefinition) {
+			// 依次调用每个处理器的 postProcessMergedBeanDefinition 方法
+			// 常见的实现类包括：
+			// - AutowiredAnnotationBeanPostProcessor：解析 @Autowired、@Value
+			// - CommonAnnotationBeanPostProcessor：解析 @Resource、@PostConstruct、@PreDestroy
+			// - ScheduledAnnotationBeanPostProcessor：解析 @Scheduled
 			processor.postProcessMergedBeanDefinition(mbd, beanType, beanName);
 		}
 	}
