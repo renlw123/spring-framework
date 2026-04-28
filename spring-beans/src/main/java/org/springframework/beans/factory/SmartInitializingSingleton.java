@@ -44,14 +44,49 @@ package org.springframework.beans.factory;
 public interface SmartInitializingSingleton {
 
 	/**
-	 * Invoked right at the end of the singleton pre-instantiation phase,
-	 * with a guarantee that all regular singleton beans have been created
-	 * already. {@link ListableBeanFactory#getBeansOfType} calls within
-	 * this method won't trigger accidental side effects during bootstrap.
-	 * <p><b>NOTE:</b> This callback won't be triggered for singleton beans
-	 * lazily initialized on demand after {@link BeanFactory} bootstrap,
-	 * and not for any other bean scope either. Carefully use it for beans
-	 * with the intended bootstrap semantics only.
+	 * 在单例预实例化阶段的最后时刻被调用。
+	 *
+	 * <p><b>执行时机：</b>
+	 * 在 Spring 容器完成所有单例 Bean 的创建之后，立即执行。
+	 * 这是 Spring 容器启动过程中非常靠后的一个扩展点。
+	 *
+	 * <p><b>核心保证：</b>
+	 * <ul>
+	 *   <li>所有常规单例 Bean 都已经完成实例化、属性注入、初始化</li>
+	 *   <li>此时调用 {@link ListableBeanFactory#getBeansOfType} 不会触发意外的副作用</li>
+	 * </ul>
+	 *
+	 * <p><b>典型应用场景：</b>
+	 * <ul>
+	 *   <li>初始化和预热缓存系统</li>
+	 *   <li>启动后台任务/定时任务（如 @Scheduled 的初始化）</li>
+	 *   <li>在所有 Bean 就绪后执行某些全局初始化逻辑</li>
+	 *   <li>扫描并注册处理器（如 Spring 的 EventListenerMethodProcessor）</li>
+	 * </ul>
+	 *
+	 * <p><b>⚠️ 注意事项：</b>
+	 * <ul>
+	 *   <li><b>不会触发</b>：懒加载的单例 Bean（在容器启动后通过 getBean() 创建的）</li>
+	 *   <li><b>不会触发</b>：原型作用域的 Bean</li>
+	 *   <li><b>谨慎使用</b>：只用于那些确实需要在启动时执行的业务逻辑</li>
+	 * </ul>
+	 *
+	 * <p><b>Spring 内部使用示例：</b>
+	 * <pre>
+	 * // EventListenerMethodProcessor 实现此接口
+	 * public class EventListenerMethodProcessor implements SmartInitializingSingleton {
+	 *     @Override
+	 *     public void afterSingletonsInstantiated() {
+	 *         // 在所有 Bean 创建完成后，扫描并注册 @EventListener 方法
+	 *         for (String beanName : beanFactory.getBeanNamesForType(Object.class)) {
+	 *             processBean(beanName, beanFactory.getBean(beanName));
+	 *         }
+	 *     }
+	 * }
+	 * </pre>
+	 *
+	 * @see SmartInitializingSingleton
+	 * @see ListableBeanFactory#getBeansOfType
 	 */
 	void afterSingletonsInstantiated();
 
