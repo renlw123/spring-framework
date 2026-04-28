@@ -486,13 +486,63 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 	}
 
 	/**
-	 * Callback after singleton creation.
-	 * <p>The default implementation marks the singleton as not in creation anymore.
-	 * @param beanName the name of the singleton that has been created
+	 * 单例 Bean 创建完成后的回调方法。
+	 * <p>默认实现将单例标记为不再处于创建中状态。
+	 *
+	 * <p><b>调用时机：</b>
+	 * 在 Bean 实例完全创建完成后（包括实例化、属性填充、初始化、所有后置处理器执行完毕），
+	 * 即将放入一级缓存（singletonObjects）之前调用。
+	 *
+	 * <p><b>核心作用：</b>
+	 * 清理创建状态标记，将当前 Bean 从"正在创建中"的集合中移除。
+	 * 这是 Spring 解决循环依赖的关键机制之一。
+	 *
+	 * <p><b>与 beforeSingletonCreation 的对应关系：</b>
+	 * <pre>
+	 * beforeSingletonCreation(beanName)  ← 开始创建时标记
+	 *   → 创建 Bean 的各种操作
+	 *   → afterSingletonCreation(beanName)  ← 创建完成后清除标记
+	 * </pre>
+	 *
+	 * <p><b>状态管理机制：</b>
+	 * <ul>
+	 *   <li>singletonsCurrentlyInCreation：Set 集合，记录当前正在创建中的单例 Bean 名称</li>
+	 *   <li>开始创建时：singletonsCurrentlyInCreation.add(beanName)</li>
+	 *   <li>创建完成时：singletonsCurrentlyInCreation.remove(beanName) ← 当前方法</li>
+	 * </ul>
+	 *
+	 * <p><b>异常场景：</b>
+	 * 如果尝试移除一个不在创建中的 Bean 名称，会抛出 IllegalStateException，
+	 * 这通常表示出现了不正常的创建流程（如重复移除或未正确开始）
+	 *
+	 * <p><b>与循环依赖的关系：</b>
+	 * <pre>
+	 * 循环依赖场景下的状态变化：
+	 * 1. 创建 A → beforeSingletonCreation 标记 A（A 在创建中）
+	 * 2. A 依赖 B → 开始创建 B → beforeSingletonCreation 标记 B
+	 * 3. B 依赖 A → 发现 A 在创建中 → 通过早期引用解决循环依赖
+	 * 4. B 创建完成 → afterSingletonCreation 移除 B
+	 * 5. A 继续完成 → afterSingletonCreation 移除 A
+	 * </pre>
+	 *
+	 * <p><b>注意事项：</b>
+	 * <ul>
+	 *   <li>此方法在 finally 块中被调用，确保即使创建失败也会清理状态</li>
+	 *   <li>通过 inCreationCheckExclusions 可以排除某些 Bean 的创建状态检查</li>
+	 *   <li>这是容器内部方法，不是扩展点，开发者无法直接干预</li>
+	 * </ul>
+	 *
+	 * @param beanName 已经创建完成的单例 Bean 名称
+	 * @see #beforeSingletonCreation
 	 * @see #isSingletonCurrentlyInCreation
+	 * @see #singletonsCurrentlyInCreation
 	 */
 	protected void afterSingletonCreation(String beanName) {
-		if (!this.inCreationCheckExclusions.contains(beanName) && !this.singletonsCurrentlyInCreation.remove(beanName)) {
+		// 检查排除列表：某些 Bean 不需要进行创建状态检查（如通过 getBean 获取的已存在 Bean）
+		// 然后尝试从"正在创建中"的集合中移除当前 Bean 名称
+		// 如果移除失败（集合中不存在），说明状态不一致，抛出异常
+		if (!this.inCreationCheckExclusions.contains(beanName)
+				&& !this.singletonsCurrentlyInCreation.remove(beanName)) {
 			throw new IllegalStateException("Singleton '" + beanName + "' isn't currently in creation");
 		}
 	}
