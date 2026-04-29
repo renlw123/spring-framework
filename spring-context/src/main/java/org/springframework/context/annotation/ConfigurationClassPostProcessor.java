@@ -248,24 +248,48 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 	}
 
 	/**
-	 * Prepare the Configuration classes for servicing bean requests at runtime
-	 * by replacing them with CGLIB-enhanced subclasses.
+	 * 为运行时处理 Bean 请求做好准备，将配置类替换为 CGLIB 增强的子类。
+	 * <p>这个方法的主要作用：
+	 * <ol>
+	 *   <li>对 @Configuration 配置类进行 CGLIB 代理增强，解决 @Bean 方法之间的调用问题</li>
+	 *   <li>添加 ImportAwareBeanPostProcessor 后置处理器</li>
+	 * </ol>
+	 *
+	 * @param beanFactory 需要增强的 BeanFactory
 	 */
 	@Override
 	public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) {
+		// 使用 System.identityHashCode 获取 beanFactory 的唯一标识（不是 hashCode，而是内存地址相关）
 		int factoryId = System.identityHashCode(beanFactory);
+
+		// 检查这个 BeanFactory 是否已经被当前处理器处理过了
+		// factoriesPostProcessed：记录已经执行过 postProcessBeanFactory 的 BeanFactory
 		if (this.factoriesPostProcessed.contains(factoryId)) {
 			throw new IllegalStateException(
 					"postProcessBeanFactory already called on this post-processor against " + beanFactory);
 		}
+		// 记录这个 BeanFactory 已经被处理
 		this.factoriesPostProcessed.add(factoryId);
+
+		// ========== 兜底逻辑：如果之前没有执行过注册阶段的处理 ==========
+		// registriesPostProcessed：记录已经执行过 postProcessBeanDefinitionRegistry 的 BeanFactory
 		if (!this.registriesPostProcessed.contains(factoryId)) {
-			// BeanDefinitionRegistryPostProcessor hook apparently not supported...
-			// Simply call processConfigurationClasses lazily at this point then.
+			// 这种情况通常发生在：
+			// 1. 这个处理器只作为 BeanFactoryPostProcessor 使用，而不是 BeanDefinitionRegistryPostProcessor
+			// 2. 或者在某些容器实现中没有调用 postProcessBeanDefinitionRegistry
+			//
+			// 此时懒加载地执行配置类解析（兜底保证配置类被处理）
 			processConfigBeanDefinitions((BeanDefinitionRegistry) beanFactory);
 		}
 
+		// ========== 核心功能：增强配置类 ==========
+		// 找出所有 @Configuration 配置类，使用 CGLIB 创建动态代理子类
+		// 这样做的目的：保证 @Bean 方法之间的调用返回的是同一个 Bean 实例
+		// 例如：config.userService() 调用 config.dataSource() 时，能返回容器托管的单例
 		enhanceConfigurationClasses(beanFactory);
+
+		// 添加一个 BeanPostProcessor，用于处理实现了 ImportAware 接口的 Bean
+		// ImportAware 接口通常与 @Import 注解配合使用，让导入的配置类感知导入它的注解
 		beanFactory.addBeanPostProcessor(new ImportAwareBeanPostProcessor(beanFactory));
 	}
 
