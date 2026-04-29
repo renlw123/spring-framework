@@ -244,51 +244,88 @@ public class ClassPathBeanDefinitionScanner extends ClassPathScanningCandidateCo
 
 
 	/**
-	 * Perform a scan within the specified base packages.
-	 * @param basePackages the packages to check for annotated classes
-	 * @return number of beans registered
+	 * 在指定的基础包中执行扫描操作
+	 * @param basePackages 要扫描的包路径（如 "com.example.controller"）
+	 * @return 注册的 bean 数量
 	 */
 	public int scan(String... basePackages) {
+		// ========== 1. 记录扫描前的 BeanDefinition 数量 ==========
 		int beanCountAtScanStart = this.registry.getBeanDefinitionCount();
 
+		// ========== 2. 执行核心扫描 ==========
+		// 调用 doScan 方法，实际的扫描和注册逻辑在这里
+		// 会查找所有带 @Component 注解的类，并创建 BeanDefinition
 		doScan(basePackages);
 
-		// Register annotation config processors, if necessary.
+		// ========== 3. 注册注解配置处理器（如果需要）==========
+		// 检查是否需要注册注解配置后处理器
+		// includeAnnotationConfig 默认为 true
 		if (this.includeAnnotationConfig) {
+			// 注册处理 @Configuration、@Autowired、@Required 等注解的后处理器
+			// 注册的包括：
+			// - ConfigurationClassPostProcessor（处理 @Configuration 和 @Bean）
+			// - AutowiredAnnotationBeanPostProcessor（处理 @Autowired）
+			// - CommonAnnotationBeanPostProcessor（处理 @PostConstruct、@PreDestroy）
+			// - PersistenceAnnotationBeanPostProcessor（处理 @PersistenceContext）
+			// - EventListenerMethodProcessor（处理 @EventListener）
 			AnnotationConfigUtils.registerAnnotationConfigProcessors(this.registry);
 		}
 
+		// ========== 4. 计算并返回本次扫描新增的数量 ==========
 		return (this.registry.getBeanDefinitionCount() - beanCountAtScanStart);
 	}
 
 	/**
-	 * Perform a scan within the specified base packages,
-	 * returning the registered bean definitions.
-	 * <p>This method does <i>not</i> register an annotation config processor
-	 * but rather leaves this up to the caller.
-	 * @param basePackages the packages to check for annotated classes
-	 * @return set of beans registered if any for tooling registration purposes (never {@code null})
+	 * 在指定的基础包中执行扫描，返回注册的 BeanDefinition。
+	 * <p>此方法不会注册注解配置处理器，这由调用方负责。
+	 * @param basePackages 要检查注解类的包路径
+	 * @return 注册的 BeanDefinition 集合（用于工具注册目的，永远不会是 {@code null}）
 	 */
 	protected Set<BeanDefinitionHolder> doScan(String... basePackages) {
+		// ========== 1. 参数校验 ==========
 		Assert.notEmpty(basePackages, "At least one base package must be specified");
+
+		// 存储所有扫描到的 BeanDefinitionHolder
 		Set<BeanDefinitionHolder> beanDefinitions = new LinkedHashSet<>();
+
+		// ========== 2. 遍历每个包路径 ==========
 		for (String basePackage : basePackages) {
+			// 2.1 查找候选组件（核心：扫描并读取类元数据）
 			Set<BeanDefinition> candidates = findCandidateComponents(basePackage);
+
+			// ========== 3. 处理每个候选类 ==========
 			for (BeanDefinition candidate : candidates) {
+				// 3.1 解析作用域元数据（@Scope 注解）
 				ScopeMetadata scopeMetadata = this.scopeMetadataResolver.resolveScopeMetadata(candidate);
 				candidate.setScope(scopeMetadata.getScopeName());
+
+				// 3.2 生成 Bean 名称（默认：类名首字母小写）
 				String beanName = this.beanNameGenerator.generateBeanName(candidate, this.registry);
+
+				// 3.3 后处理 BeanDefinition（如果是 AbstractBeanDefinition）
 				if (candidate instanceof AbstractBeanDefinition) {
 					postProcessBeanDefinition((AbstractBeanDefinition) candidate, beanName);
 				}
+
+				// 3.4 处理通用注解定义（@Lazy、@Primary、@DependsOn 等）
 				if (candidate instanceof AnnotatedBeanDefinition) {
 					AnnotationConfigUtils.processCommonDefinitionAnnotations((AnnotatedBeanDefinition) candidate);
 				}
+
+				// 3.5 检查 Bean 名称是否冲突
 				if (checkCandidate(beanName, candidate)) {
+					// 3.6 创建 BeanDefinitionHolder（包装器）
 					BeanDefinitionHolder definitionHolder = new BeanDefinitionHolder(candidate, beanName);
-					definitionHolder =
-							AnnotationConfigUtils.applyScopedProxyMode(scopeMetadata, definitionHolder, this.registry);
+
+					// 3.7 应用作用域代理模式（如果需要）
+					// 例如：@Scope(proxyMode = ScopedProxyMode.TARGET_CLASS)
+					definitionHolder = AnnotationConfigUtils.applyScopedProxyMode(
+							scopeMetadata, definitionHolder, this.registry);
+
+					// 3.8 添加到结果集
 					beanDefinitions.add(definitionHolder);
+
+					// 3.9 注册到容器（最重要的一步）
 					registerBeanDefinition(definitionHolder, this.registry);
 				}
 			}

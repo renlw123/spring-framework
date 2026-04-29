@@ -186,76 +186,86 @@ public class AnnotationConfigWebApplicationContext extends AbstractRefreshableWe
 
 
 	/**
-	 * Register a {@link org.springframework.beans.factory.config.BeanDefinition} for
-	 * any classes specified by {@link #register(Class...)} and scan any packages
-	 * specified by {@link #scan(String...)}.
-	 * <p>For any values specified by {@link #setConfigLocation(String)} or
-	 * {@link #setConfigLocations(String[])}, attempt first to load each location as a
-	 * class, registering a {@code BeanDefinition} if class loading is successful,
-	 * and if class loading fails (i.e. a {@code ClassNotFoundException} is raised),
-	 * assume the value is a package and attempt to scan it for component classes.
-	 * <p>Enables the default set of annotation configuration post processors, such that
-	 * {@code @Autowired}, {@code @Required}, and associated annotations can be used.
-	 * <p>Configuration class bean definitions are registered with generated bean
-	 * definition names unless the {@code value} attribute is provided to the stereotype
-	 * annotation.
-	 * @param beanFactory the bean factory to load bean definitions into
-	 * @see #register(Class...)
-	 * @see #scan(String...)
-	 * @see #setConfigLocation(String)
-	 * @see #setConfigLocations(String[])
-	 * @see AnnotatedBeanDefinitionReader
-	 * @see ClassPathBeanDefinitionScanner
+	 * 为指定的类注册 BeanDefinition，并扫描指定的包。
+	 *
+	 * 处理逻辑：
+	 * 1. 对于通过 {@link #register(Class...)} 指定的类，直接注册
+	 * 2. 对于通过 {@link #scan(String...)} 指定的包，进行组件扫描
+	 * 3. 对于通过 {@link #setConfigLocation(String)} 等指定的配置位置：
+	 *    - 先尝试作为类加载，成功则注册 BeanDefinition
+	 *    - 加载失败（ClassNotFoundException），则作为包名进行组件扫描
+	 *
+	 * 同时启用默认的注解配置后处理器，使 @Autowired、@Required 等注解可用。
+	 *
+	 * @param beanFactory 要加载 BeanDefinition 的 bean 工厂
 	 */
 	@Override
 	protected void loadBeanDefinitions(DefaultListableBeanFactory beanFactory) {
+		// ========== 1. 创建核心组件 ==========
+		// 创建注解 Bean 定义读取器（用于编程式注册单个类）
 		AnnotatedBeanDefinitionReader reader = getAnnotatedBeanDefinitionReader(beanFactory);
+		// 创建类路径 Bean 定义扫描器（用于扫描包路径下的组件）
 		ClassPathBeanDefinitionScanner scanner = getClassPathBeanDefinitionScanner(beanFactory);
 
+		// ========== 2. 设置 Bean 名称生成器 ==========
 		BeanNameGenerator beanNameGenerator = getBeanNameGenerator();
 		if (beanNameGenerator != null) {
+			// 为 reader 和 scanner 设置统一的名称生成策略
 			reader.setBeanNameGenerator(beanNameGenerator);
 			scanner.setBeanNameGenerator(beanNameGenerator);
+			// 将名称生成器也注册为单例，供其他地方使用
 			beanFactory.registerSingleton(AnnotationConfigUtils.CONFIGURATION_BEAN_NAME_GENERATOR, beanNameGenerator);
 		}
 
+		// ========== 3. 设置作用域元数据解析器 ==========
 		ScopeMetadataResolver scopeMetadataResolver = getScopeMetadataResolver();
 		if (scopeMetadataResolver != null) {
 			reader.setScopeMetadataResolver(scopeMetadataResolver);
 			scanner.setScopeMetadataResolver(scopeMetadataResolver);
 		}
 
+		// ========== 4. 注册组件类 ==========
+		// 处理通过 register(Class...) 方法添加的类
 		if (!this.componentClasses.isEmpty()) {
 			if (logger.isDebugEnabled()) {
 				logger.debug("Registering component classes: [" +
 						StringUtils.collectionToCommaDelimitedString(this.componentClasses) + "]");
 			}
+			// 将 componentClasses 集合中的类批量注册
 			reader.register(ClassUtils.toClassArray(this.componentClasses));
 		}
 
+		// ========== 5. 扫描基础包 ==========
+		// 处理通过 scan(String...) 方法添加的包
 		if (!this.basePackages.isEmpty()) {
 			if (logger.isDebugEnabled()) {
 				logger.debug("Scanning base packages: [" +
 						StringUtils.collectionToCommaDelimitedString(this.basePackages) + "]");
 			}
+			// 扫描指定包下的所有组件（@Component、@Service、@Repository 等）
 			scanner.scan(StringUtils.toStringArray(this.basePackages));
 		}
 
+		// ========== 6. 处理配置位置（智能识别：类 or 包）==========
 		String[] configLocations = getConfigLocations();
 		if (configLocations != null) {
 			for (String configLocation : configLocations) {
 				try {
+					// 【尝试1：作为类名加载】
 					Class<?> clazz = ClassUtils.forName(configLocation, getClassLoader());
 					if (logger.isTraceEnabled()) {
 						logger.trace("Registering [" + configLocation + "]");
 					}
+					// 成功：注册该类
 					reader.register(clazz);
 				}
 				catch (ClassNotFoundException ex) {
+					// 【尝试2：作为包名进行扫描】
 					if (logger.isTraceEnabled()) {
 						logger.trace("Could not load class for config location [" + configLocation +
 								"] - trying package scan. " + ex);
 					}
+					// 扫描该包路径
 					int count = scanner.scan(configLocation);
 					if (count == 0 && logger.isDebugEnabled()) {
 						logger.debug("No component classes found for specified class/package [" + configLocation + "]");
@@ -264,7 +274,6 @@ public class AnnotationConfigWebApplicationContext extends AbstractRefreshableWe
 			}
 		}
 	}
-
 
 	/**
 	 * Build an {@link AnnotatedBeanDefinitionReader} for the given bean factory.
