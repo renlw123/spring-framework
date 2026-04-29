@@ -256,36 +256,77 @@ public abstract class AnnotationConfigUtils {
 		}
 	}
 
+	/**
+	 * 处理 Bean 定义中的通用注解，将注解属性应用到 AnnotatedBeanDefinition 中。
+	 * 这是 Spring 注解驱动的核心工具方法，处理所有 Bean 都通用的基础注解。
+	 *
+	 * 处理的注解包括：
+	 * - @Lazy：是否懒加载
+	 * - @Primary：是否为首选 Bean
+	 * - @DependsOn：依赖的其他 Bean 名称
+	 * - @Role：Bean 的角色（应用组件/基础设施组件等）
+	 * - @Description：Bean 的描述信息
+	 *
+	 * @param abd AnnotatedBeanDefinition 实例，需要应用注解配置
+	 */
+	// 公共 API：使用 BeanDefinition 自身的元数据
 	public static void processCommonDefinitionAnnotations(AnnotatedBeanDefinition abd) {
+		// 调用内部方法，传入 BeanDefinition 的元数据
 		processCommonDefinitionAnnotations(abd, abd.getMetadata());
 	}
 
+	// 内部静态方法：允许传入额外的元数据源（用于处理父类/接口的注解）
 	static void processCommonDefinitionAnnotations(AnnotatedBeanDefinition abd, AnnotatedTypeMetadata metadata) {
+
+		// ========== 1. 处理 @Lazy 注解 ==========
+		// 尝试从传入的 metadata 中获取 @Lazy 注解属性
 		AnnotationAttributes lazy = attributesFor(metadata, Lazy.class);
 		if (lazy != null) {
+			// 如果存在 @Lazy 注解，根据其 value 属性设置懒加载标志
 			abd.setLazyInit(lazy.getBoolean("value"));
 		}
 		else if (abd.getMetadata() != metadata) {
+			// 如果传入的 metadata 和 BeanDefinition 自身的元数据不是同一个对象
+			// （例如传入的是父类或接口的元数据），则再从 BeanDefinition 自身的元数据中查找
 			lazy = attributesFor(abd.getMetadata(), Lazy.class);
 			if (lazy != null) {
 				abd.setLazyInit(lazy.getBoolean("value"));
 			}
 		}
+		// 注意：else 分支表示既没有配置 @Lazy，或者 @Lazy 不存在，则保持默认值（false）
 
+		// ========== 2. 处理 @Primary 注解 ==========
+		// 检查元数据上是否存在 @Primary 注解
 		if (metadata.isAnnotated(Primary.class.getName())) {
+			// 如果存在，设置为首选 Bean
 			abd.setPrimary(true);
 		}
+
+		// ========== 3. 处理 @DependsOn 注解 ==========
+		// 获取 @DependsOn 注解属性
 		AnnotationAttributes dependsOn = attributesFor(metadata, DependsOn.class);
 		if (dependsOn != null) {
+			// 设置依赖的其他 Bean 名称数组
+			// Spring 会在初始化当前 Bean 之前，先初始化这些依赖的 Bean
 			abd.setDependsOn(dependsOn.getStringArray("value"));
 		}
 
+		// ========== 4. 处理 @Role 注解 ==========
+		// 获取 @Role 注解属性
 		AnnotationAttributes role = attributesFor(metadata, Role.class);
 		if (role != null) {
+			// 设置 Bean 的角色：
+			// - BeanDefinition.ROLE_APPLICATION (0)：应用组件（默认）
+			// - BeanDefinition.ROLE_SUPPORT (1)：支持组件
+			// - BeanDefinition.ROLE_INFRASTRUCTURE (2)：基础设施组件
 			abd.setRole(role.getNumber("value").intValue());
 		}
+
+		// ========== 5. 处理 @Description 注解 ==========
+		// 获取 @Description 注解属性
 		AnnotationAttributes description = attributesFor(metadata, Description.class);
 		if (description != null) {
+			// 设置 Bean 的描述信息（用于监控或文档目的）
 			abd.setDescription(description.getString("value"));
 		}
 	}
