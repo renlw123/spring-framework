@@ -61,13 +61,21 @@ public class AnnotationConfigApplicationContext extends GenericApplicationContex
 
 
 	/**
-	 * Create a new AnnotationConfigApplicationContext that needs to be populated
-	 * through {@link #register} calls and then manually {@linkplain #refresh refreshed}.
+	 * 创建一个新的 AnnotationConfigApplicationContext 实例，
+	 * 该实例需要通过 {@link #register} 方法注册配置类或组件，
+	 * 然后手动调用 {@linkplain #refresh} 方法来刷新容器上下文。
 	 */
 	public AnnotationConfigApplicationContext() {
+		// 创建启动步骤，用于记录“创建注解式Bean定义读取器”的性能指标或跟踪信息
 		StartupStep createAnnotatedBeanDefReader = getApplicationStartup().start("spring.context.annotated-bean-reader.create");
+
+		// 创建注解式Bean定义读取器，用于解析带有注解的配置类或组件类（如 @Configuration、@Component 等）
 		this.reader = new AnnotatedBeanDefinitionReader(this);
+
+		// 结束当前启动步骤的记录
 		createAnnotatedBeanDefReader.end();
+
+		// 创建类路径下的Bean定义扫描器，用于后续通过包路径扫描并注册候选组件（如 @Component、@Service 等）
 		this.scanner = new ClassPathBeanDefinitionScanner(this);
 	}
 

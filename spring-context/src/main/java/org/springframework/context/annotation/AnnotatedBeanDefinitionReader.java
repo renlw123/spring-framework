@@ -58,33 +58,43 @@ public class AnnotatedBeanDefinitionReader {
 
 
 	/**
-	 * Create a new {@code AnnotatedBeanDefinitionReader} for the given registry.
-	 * <p>If the registry is {@link EnvironmentCapable}, e.g. is an {@code ApplicationContext},
-	 * the {@link Environment} will be inherited, otherwise a new
-	 * {@link StandardEnvironment} will be created and used.
-	 * @param registry the {@code BeanFactory} to load bean definitions into,
-	 * in the form of a {@code BeanDefinitionRegistry}
+	 * 为给定的注册表创建一个新的 {@code AnnotatedBeanDefinitionReader}（注解式 Bean 定义读取器）。
+	 * <p>如果该注册表是 {@link EnvironmentCapable} 的实现类（例如是 {@code ApplicationContext}），
+	 * 则会继承其内部的 {@link Environment} 环境对象；否则，将创建一个新的
+	 * {@link StandardEnvironment} 标准环境对象并使用它。
+	 *
+	 * @param registry 用于加载 Bean 定义的 {@code BeanFactory}，以 {@code BeanDefinitionRegistry} 的形式传入
 	 * @see #AnnotatedBeanDefinitionReader(BeanDefinitionRegistry, Environment)
 	 * @see #setEnvironment(Environment)
 	 */
 	public AnnotatedBeanDefinitionReader(BeanDefinitionRegistry registry) {
+		// 调用另一个构造器，传入注册表以及通过 getOrCreateEnvironment 方法获取或创建的环境对象
 		this(registry, getOrCreateEnvironment(registry));
 	}
 
 	/**
-	 * Create a new {@code AnnotatedBeanDefinitionReader} for the given registry,
-	 * using the given {@link Environment}.
-	 * @param registry the {@code BeanFactory} to load bean definitions into,
-	 * in the form of a {@code BeanDefinitionRegistry}
-	 * @param environment the {@code Environment} to use when evaluating bean definition
-	 * profiles.
+	 * 使用给定的 {@link Environment} 环境对象，为指定的注册表创建一个新的
+	 * {@code AnnotatedBeanDefinitionReader}（注解式 Bean 定义读取器）。
+	 *
+	 * @param registry   用于加载 Bean 定义的 {@code BeanFactory}，以 {@code BeanDefinitionRegistry} 的形式传入
+	 * @param environment 在评估 Bean 定义中的配置条件（如 {@code @Profile}）时所使用的环境对象
 	 * @since 3.1
 	 */
 	public AnnotatedBeanDefinitionReader(BeanDefinitionRegistry registry, Environment environment) {
+		// 断言：注册表参数不能为空
 		Assert.notNull(registry, "BeanDefinitionRegistry must not be null");
+		// 断言：环境参数不能为空
 		Assert.notNull(environment, "Environment must not be null");
+
+		// 保存注册表引用，后续用于注册 Bean 定义
 		this.registry = registry;
+
+		// 创建条件评估器，用于处理 @Conditional 等条件注解，判断 Bean 是否应被注册
 		this.conditionEvaluator = new ConditionEvaluator(registry, environment, null);
+
+		// 向当前的注册表中注册处理注解配置所需的内置处理器
+		// 例如：ConfigurationClassPostProcessor、AutowiredAnnotationBeanPostProcessor 等
+		// 这些处理器支持 @Configuration、@Autowired、@Required 等注解的功能
 		AnnotationConfigUtils.registerAnnotationConfigProcessors(this.registry);
 	}
 
