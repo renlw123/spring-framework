@@ -673,43 +673,56 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 	/**
-	 * Prepare this context for refreshing, setting its startup date and
-	 * active flag as well as performing any initialization of property sources.
+	 * 准备刷新上下文，设置启动日期和活动标志，
+	 * 并执行属性源的任何初始化工作。
 	 */
 	protected void prepareRefresh() {
-		// Switch to active.
+		// ========== 1. 状态切换 ==========
+		// 记录容器启动的时间戳（毫秒）
 		this.startupDate = System.currentTimeMillis();
+		// 标记容器未关闭（使用原子布尔值保证线程安全）
 		this.closed.set(false);
+		// 标记容器为活跃状态
 		this.active.set(true);
 
+		// ========== 2. 日志输出 ==========
 		if (logger.isDebugEnabled()) {
 			if (logger.isTraceEnabled()) {
+				// 最详细级别：输出完整对象信息
 				logger.trace("Refreshing " + this);
-			}
-			else {
+			} else {
+				// 调试级别：输出显示名称（如：'org.springframework.context...'）
 				logger.debug("Refreshing " + getDisplayName());
 			}
 		}
 
-		// Initialize any placeholder property sources in the context environment.
+		// ========== 3. 初始化属性源 ==========
+		// 初始化环境中的任何占位符属性源
+		// （子类可重写此方法，例如在Web环境中添加ServletContext参数）
 		initPropertySources();
 
-		// Validate that all properties marked as required are resolvable:
-		// see ConfigurablePropertyResolver#setRequiredProperties
+		// ========== 4. 验证必需属性 ==========
+		// 验证所有标记为必需的属性是否都可解析
+		// 参见 ConfigurablePropertyResolver#setRequiredProperties
+		// 如果缺少必需属性，会抛出 MissingRequiredPropertiesException
 		getEnvironment().validateRequiredProperties();
 
-		// Store pre-refresh ApplicationListeners...
+		// ========== 5. 保存早期应用监听器 ==========
+		// 用于在刷新过程中保留刷新前的监听器快照
 		if (this.earlyApplicationListeners == null) {
+			// 首次刷新：将当前所有监听器复制到早期监听器集合
 			this.earlyApplicationListeners = new LinkedHashSet<>(this.applicationListeners);
-		}
-		else {
-			// Reset local application listeners to pre-refresh state.
+		} else {
+			// 非首次刷新（如已调用过 refresh()）：恢复刷新前的监听器状态
+			// 清空当前监听器
 			this.applicationListeners.clear();
+			// 从早期快照中恢复所有监听器
 			this.applicationListeners.addAll(this.earlyApplicationListeners);
 		}
 
-		// Allow for the collection of early ApplicationEvents,
-		// to be published once the multicaster is available...
+		// ========== 6. 准备早期事件收集器 ==========
+		// 允许收集早期应用事件（在事件多播器可用之前产生的事件）
+		// 这些事件会暂存在这里，等事件多播器初始化后再统一发布
 		this.earlyApplicationEvents = new LinkedHashSet<>();
 	}
 
