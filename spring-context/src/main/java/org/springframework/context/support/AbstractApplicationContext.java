@@ -633,7 +633,7 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 
 				// ============ 步骤10：注册事件监听器 ============
 				// 找出所有实现了 ApplicationListener 接口的 Bean
-				// 将它们注册到事件广播器上
+				// 将它们注册到事件广播器上，关联步骤8，广播器负责广播，监听器负责监听执行，观察者模式
 				registerListeners();
 
 				// ============ 步骤11：实例化所有非懒加载的单例 Bean ============
