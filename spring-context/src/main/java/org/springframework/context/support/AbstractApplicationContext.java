@@ -932,33 +932,64 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 	/**
-	 * Initialize the {@link MessageSource}.
-	 * <p>Uses parent's {@code MessageSource} if none defined in this context.
+	 * 初始化 MessageSource（国际化消息源）
+	 *
+	 * 作用：为容器提供国际化（i18n）支持，用于根据不同语言环境解析文本消息
+	 *
+	 * 执行逻辑：
+	 * 1. 判断容器中是否有用户自定义的 messageSource Bean
+	 *    - 有：使用自定义的 MessageSource
+	 *    - 无：创建默认的 DelegatingMessageSource 作为兜底
+	 * 2. 处理父子容器的消息源继承关系
+	 * 3. 将 MessageSource 保存到 ApplicationContext 中供后续使用
+	 *
+	 * 注意：MessageSource 的 Bean 名称固定为 "messageSource"
+	 *
 	 * @see #MESSAGE_SOURCE_BEAN_NAME
 	 */
 	protected void initMessageSource() {
+		// 获取 BeanFactory（用于操作 Bean）
 		ConfigurableListableBeanFactory beanFactory = getBeanFactory();
+
+		// 情况1：容器中已存在自定义的 messageSource Bean
+		// containsLocalBean：只检查当前容器，不检查父容器
 		if (beanFactory.containsLocalBean(MESSAGE_SOURCE_BEAN_NAME)) {
+			// 获取用户自定义的 MessageSource 实例
 			this.messageSource = beanFactory.getBean(MESSAGE_SOURCE_BEAN_NAME, MessageSource.class);
-			// Make MessageSource aware of parent MessageSource.
+
+			// 处理父子容器的 MessageSource 继承关系
+			// 作用：如果当前容器找不到某个消息，可以委托给父容器查找
 			if (this.parent != null && this.messageSource instanceof HierarchicalMessageSource) {
 				HierarchicalMessageSource hms = (HierarchicalMessageSource) this.messageSource;
+				// 仅当用户没有手动设置父级 MessageSource 时，才自动设置
 				if (hms.getParentMessageSource() == null) {
-					// Only set parent context as parent MessageSource if no parent MessageSource
-					// registered already.
+					// 将父容器的 MessageSource 设置为当前消息源的父级
 					hms.setParentMessageSource(getInternalParentMessageSource());
 				}
 			}
+
+			// 日志记录（trace 级别）
 			if (logger.isTraceEnabled()) {
 				logger.trace("Using MessageSource [" + this.messageSource + "]");
 			}
 		}
+		// 情况2：容器中没有自定义的 messageSource Bean
 		else {
-			// Use empty MessageSource to be able to accept getMessage calls.
+			// 创建一个空的 MessageSource（什么都不做，但能接受 getMessage 调用而不报错）
+			// 设计模式：空对象模式（Null Object Pattern）
 			DelegatingMessageSource dms = new DelegatingMessageSource();
+
+			// 同样设置父容器的 MessageSource（如果有的话）
 			dms.setParentMessageSource(getInternalParentMessageSource());
+
+			// 保存到当前 ApplicationContext 中
 			this.messageSource = dms;
+
+			// 将默认的 MessageSource 注册为单例 Bean
+			// 作用：让其他组件也可以通过依赖注入获取它
 			beanFactory.registerSingleton(MESSAGE_SOURCE_BEAN_NAME, this.messageSource);
+
+			// 日志记录（trace 级别）
 			if (logger.isTraceEnabled()) {
 				logger.trace("No '" + MESSAGE_SOURCE_BEAN_NAME + "' bean, using [" + this.messageSource + "]");
 			}
