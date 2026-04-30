@@ -997,23 +997,35 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 	/**
-	 * Initialize the {@link ApplicationEventMulticaster}.
-	 * <p>Uses {@link SimpleApplicationEventMulticaster} if none defined in the context.
-	 * @see #APPLICATION_EVENT_MULTICASTER_BEAN_NAME
+	 * 初始化应用程序事件广播器（ApplicationEventMulticaster）。
+	 * <p>如果上下文中没有定义自定义的事件广播器，则使用 {@link SimpleApplicationEventMulticaster}。
+	 * <p>事件广播器负责将 Spring 事件分发给所有注册的监听器。
+	 *
+	 * @see #APPLICATION_EVENT_MULTICASTER_BEAN_NAME  // 默认的 Bean 名称："applicationEventMulticaster"
 	 * @see org.springframework.context.event.SimpleApplicationEventMulticaster
 	 */
 	protected void initApplicationEventMulticaster() {
+		// 1. 获取可配置的 Bean 工厂（底层容器）
 		ConfigurableListableBeanFactory beanFactory = getBeanFactory();
+
+		// 2. 检查容器中是否已经存在自定义的事件广播器
 		if (beanFactory.containsLocalBean(APPLICATION_EVENT_MULTICASTER_BEAN_NAME)) {
-			this.applicationEventMulticaster =
-					beanFactory.getBean(APPLICATION_EVENT_MULTICASTER_BEAN_NAME, ApplicationEventMulticaster.class);
+			// 2.1 如果存在，直接从容器中获取（可能是用户自定义的实现）
+			this.applicationEventMulticaster = beanFactory.getBean(
+					APPLICATION_EVENT_MULTICASTER_BEAN_NAME,
+					ApplicationEventMulticaster.class
+			);
 			if (logger.isTraceEnabled()) {
 				logger.trace("Using ApplicationEventMulticaster [" + this.applicationEventMulticaster + "]");
 			}
 		}
 		else {
+			// 2.2 如果不存在，创建默认的 SimpleApplicationEventMulticaster
 			this.applicationEventMulticaster = new SimpleApplicationEventMulticaster(beanFactory);
+
+			// 2.3 将默认事件广播器注册为单例到容器中，供其他地方使用
 			beanFactory.registerSingleton(APPLICATION_EVENT_MULTICASTER_BEAN_NAME, this.applicationEventMulticaster);
+
 			if (logger.isTraceEnabled()) {
 				logger.trace("No '" + APPLICATION_EVENT_MULTICASTER_BEAN_NAME + "' bean, using " +
 						"[" + this.applicationEventMulticaster.getClass().getSimpleName() + "]");
