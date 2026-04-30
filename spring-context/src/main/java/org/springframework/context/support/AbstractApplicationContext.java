@@ -605,8 +605,14 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 				invokeBeanFactoryPostProcessors(beanFactory);
 
 				// 6.2 注册 BeanPostProcessor
-				// BeanPostProcessor 会在 Bean 实例化前后进行拦截处理
-				// 注意：这里只是注册，真正的执行在 Bean 创建时
+				// 【作用】将容器中所有实现了 BeanPostProcessor 接口的 Bean 提前实例化，并注册到 BeanFactory 的缓存列表中。
+				// 【重要】此阶段只做"注册"，不执行任何 BeanPostProcessor 的回调逻辑：
+				//   - 注册内容：将每个 BeanPostProcessor 实例按顺序存入 beanFactory 的 beanPostProcessors 列表
+				//   - 注册时机：在所有普通 Bean 实例化之前（确保后续 Bean 创建时能立即使用）
+				//   - 执行时机：当每个普通 Bean 创建时，才会遍历上述列表并调用：
+				//       * postProcessBeforeInitialization() - Bean 初始化前调用
+				//       * postProcessAfterInitialization()  - Bean 初始化后调用
+				// 【类比】像是一个"安保系统"提前部署好监控设备（注册），当人员（普通 Bean）进出时才开始检查（执行）。
 				registerBeanPostProcessors(beanFactory);
 				beanPostProcess.end();
 
