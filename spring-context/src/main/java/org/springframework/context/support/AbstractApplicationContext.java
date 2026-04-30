@@ -648,7 +648,7 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 				// 1. 清除上下文资源缓存（如 ResourceLoader 的缓存）
 				// 2. 初始化 LifecycleProcessor（生命周期处理器）
 				// 3. 调用所有 Lifecycle 组件的 start() 方法
-				// 4. 发布 ContextRefreshedEvent 事件
+				// 4. 发布 ContextRefreshedEvent事件
 				finishRefresh();
 			}
 			catch (BeansException ex) {
