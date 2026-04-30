@@ -306,15 +306,25 @@ public class ClassPathScanningCandidateComponentProvider implements EnvironmentC
 
 
 	/**
-	 * Scan the component index or class path for candidate components.
-	 * @param basePackage the package to check for annotated classes
-	 * @return a corresponding Set of autodetected bean definitions
+	 * 扫描组件索引或类路径，查找候选组件（带有 @Component 注解的类）。
+	 *
+	 * 该方法会优先使用 Spring 的组件索引机制（如果可用且配置的过滤器支持索引），
+	 * 否则回退到传统的类路径扫描。
+	 *
+	 * @param basePackage 要检查的基础包路径（例如 "com.example.service"）
+	 * @return 自动检测到的 Bean 定义集合
 	 */
 	public Set<BeanDefinition> findCandidateComponents(String basePackage) {
+		// 1. 判断是否可以使用组件索引进而加速扫描
+		//    - componentsIndex 不为 null（表示存在 META-INF/spring.components 索引文件）
+		//    - 当前配置的过滤器支持从索引中读取（indexSupportsIncludeFilters()）
 		if (this.componentsIndex != null && indexSupportsIncludeFilters()) {
+			// 使用组件索引方式获取候选组件（性能更好，避免类路径遍历）
 			return addCandidateComponentsFromIndex(this.componentsIndex, basePackage);
 		}
 		else {
+			// 降级方案：使用传统的类路径扫描方式
+			// 遍历 JAR、目录等，读取类文件并解析元数据
 			return scanCandidateComponents(basePackage);
 		}
 	}
@@ -372,95 +382,144 @@ public class ClassPathScanningCandidateComponentProvider implements EnvironmentC
 		return null;
 	}
 
+	/**
+	 * 从组件索引（CandidateComponentsIndex）中添加候选组件。
+	 *
+	 * 该方法通过读取预编译的 META-INF/spring.components 索引文件，
+	 * 快速获取符合过滤条件的类名，然后只对这些类进行元数据解析和验证，
+	 * 避免了全类路径的遍历扫描。
+	 *
+	 * @param index Spring 组件索引（在编译期通过 spring-context-indexer 生成）
+	 * @param basePackage 要扫描的基础包路径
+	 * @return 符合条件的 Bean 定义集合
+	 */
 	private Set<BeanDefinition> addCandidateComponentsFromIndex(CandidateComponentsIndex index, String basePackage) {
 		Set<BeanDefinition> candidates = new LinkedHashSet<>();
 		try {
+			// 1. 收集所有候选类型的全限定类名
 			Set<String> types = new HashSet<>();
+
+			// 遍历所有的包含过滤器（includeFilters）
 			for (TypeFilter filter : this.includeFilters) {
+				// 从过滤器中提取对应的"原型"（stereotype）名称
+				// 例如：@Component 注解对应 "org.springframework.stereotype.Component"
 				String stereotype = extractStereotype(filter);
 				if (stereotype == null) {
 					throw new IllegalArgumentException("Failed to extract stereotype from " + filter);
 				}
+				// 从索引中获取指定包下具有该原型的候选类名集合
 				types.addAll(index.getCandidateTypes(basePackage, stereotype));
 			}
+
 			boolean traceEnabled = logger.isTraceEnabled();
 			boolean debugEnabled = logger.isDebugEnabled();
+
+			// 2. 遍历所有候选类名，逐个验证并创建 Bean 定义
 			for (String type : types) {
+				// 2.1 读取类的元数据（注解信息、接口、父类等）
 				MetadataReader metadataReader = getMetadataReaderFactory().getMetadataReader(type);
+
+				// 2.2 检查该组件是否应该被包含（通过 excludeFilters 过滤）
 				if (isCandidateComponent(metadataReader)) {
+					// 创建扫描后的 Bean 定义（ScannedGenericBeanDefinition）
 					ScannedGenericBeanDefinition sbd = new ScannedGenericBeanDefinition(metadataReader);
 					sbd.setSource(metadataReader.getResource());
+
+					// 2.3 进一步检查该组件是否可以作为候选 Bean 定义
+					//    例如：必须是具体的顶层类（非接口、非抽象类、非内部类）
 					if (isCandidateComponent(sbd)) {
 						if (debugEnabled) {
 							logger.debug("Using candidate component class from index: " + type);
 						}
 						candidates.add(sbd);
-					}
-					else {
+					} else {
 						if (debugEnabled) {
 							logger.debug("Ignored because not a concrete top-level class: " + type);
 						}
 					}
-				}
-				else {
+				} else {
 					if (traceEnabled) {
 						logger.trace("Ignored because matching an exclude filter: " + type);
 					}
 				}
 			}
-		}
-		catch (IOException ex) {
+		} catch (IOException ex) {
 			throw new BeanDefinitionStoreException("I/O failure during classpath scanning", ex);
 		}
 		return candidates;
 	}
 
+	/**
+	 * 通过传统的类路径扫描方式查找候选组件。
+	 *
+	 * 该方法会遍历指定基础包下的所有 .class 文件资源，读取每个类的元数据，
+	 * 然后根据配置的包含过滤器（includeFilters）和排除过滤器（excludeFilters）
+	 * 来判断是否为候选组件。
+	 *
+	 * @param basePackage 要扫描的基础包路径（例如 "com.example.service"）
+	 * @return 符合条件的 Bean 定义集合
+	 */
 	private Set<BeanDefinition> scanCandidateComponents(String basePackage) {
 		Set<BeanDefinition> candidates = new LinkedHashSet<>();
 		try {
+			// 1. 构建包搜索路径
+			//    示例：classpath*:com/example/service/**/*.class
 			String packageSearchPath = ResourcePatternResolver.CLASSPATH_ALL_URL_PREFIX +
 					resolveBasePackage(basePackage) + '/' + this.resourcePattern;
+
+			// 2. 获取所有匹配的资源（.class 文件）
 			Resource[] resources = getResourcePatternResolver().getResources(packageSearchPath);
+
 			boolean traceEnabled = logger.isTraceEnabled();
 			boolean debugEnabled = logger.isDebugEnabled();
+
+			// 3. 遍历每个资源文件
 			for (Resource resource : resources) {
 				if (traceEnabled) {
 					logger.trace("Scanning " + resource);
 				}
 				try {
+					// 3.1 读取类元数据（注解信息、接口、父类等）
 					MetadataReader metadataReader = getMetadataReaderFactory().getMetadataReader(resource);
+
+					// 3.2 检查该组件是否匹配过滤条件
+					//     判断是否同时满足：
+					//     - 匹配任意一个包含过滤器（includeFilters）
+					//     - 不匹配任意一个排除过滤器（excludeFilters）
 					if (isCandidateComponent(metadataReader)) {
+						// 3.3 创建扫描后的 Bean 定义
 						ScannedGenericBeanDefinition sbd = new ScannedGenericBeanDefinition(metadataReader);
 						sbd.setSource(resource);
+
+						// 3.4 进一步检查该组件是否可以作为候选 Bean 定义
+						//     验证条件：
+						//     - 是独立的类（非内部类）或者顶级类
+						//     - 是具体的类（非接口、非抽象类），除非该类包含 @Lookup 抽象方法
 						if (isCandidateComponent(sbd)) {
 							if (debugEnabled) {
 								logger.debug("Identified candidate component class: " + resource);
 							}
 							candidates.add(sbd);
-						}
-						else {
+						} else {
 							if (debugEnabled) {
 								logger.debug("Ignored because not a concrete top-level class: " + resource);
 							}
 						}
-					}
-					else {
+					} else {
 						if (traceEnabled) {
 							logger.trace("Ignored because not matching any filter: " + resource);
 						}
 					}
-				}
-				catch (FileNotFoundException ex) {
+				} catch (FileNotFoundException ex) {
+					// 文件不存在（可能在扫描过程中被删除），忽略并继续
 					if (traceEnabled) {
 						logger.trace("Ignored non-readable " + resource + ": " + ex.getMessage());
 					}
-				}
-				catch (Throwable ex) {
+				} catch (Throwable ex) {
 					throw new BeanDefinitionStoreException("Failed to read candidate component class: " + resource, ex);
 				}
 			}
-		}
-		catch (IOException ex) {
+		} catch (IOException ex) {
 			throw new BeanDefinitionStoreException("I/O failure during classpath scanning", ex);
 		}
 		return candidates;
