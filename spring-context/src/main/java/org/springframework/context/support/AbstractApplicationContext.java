@@ -641,7 +641,7 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 				// 1. 实例化所有非懒加载的单例 Bean
 				// 2. 执行依赖注入（属性填充）
 				// 3. 执行 Bean 的初始化回调（@PostConstruct、InitializingBean、init-method）
-				// 4. 注册可销毁的 Bean（用于容器关闭时的清理）
+				// 4. 注册可销毁的Bean（用于容器关闭时的清理）
 				finishBeanFactoryInitialization(beanFactory);
 
 				// ============ 步骤12：完成刷新，发布相应事件 ============
