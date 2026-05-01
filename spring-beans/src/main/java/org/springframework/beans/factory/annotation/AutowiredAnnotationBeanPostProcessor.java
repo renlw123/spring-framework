@@ -405,7 +405,7 @@ public class AutowiredAnnotationBeanPostProcessor implements SmartInstantiationA
 	public PropertyValues postProcessProperties(PropertyValues pvs, Object bean, String beanName) {
 		InjectionMetadata metadata = findAutowiringMetadata(beanName, bean.getClass(), pvs);
 		try {
-			metadata.inject(bean, beanName, pvs);
+			metadata.inject(bean, beanName, pvs);// 循环依赖12.A的AutowiredAnnotationBeanPostProcessor感知到要向A中自动装配B，开始获取B实例 //25 B的AutowiredAnnotationBeanPostProcessor感知到要向B中自动装配A，开始获取A实例
 		}
 		catch (BeanCreationException ex) {
 			throw ex;
@@ -413,7 +413,7 @@ public class AutowiredAnnotationBeanPostProcessor implements SmartInstantiationA
 		catch (Throwable ex) {
 			throw new BeanCreationException(beanName, "Injection of autowired dependencies failed", ex);
 		}
-		return pvs;
+		return pvs;// 循环依赖31. 至此B实例填充A完毕
 	}
 
 	@Deprecated

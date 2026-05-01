@@ -257,7 +257,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 
 		// ============ 步骤2：尝试从缓存中获取单例 ============
 		// 检查单例缓存中是否有手动注册的单例
-		Object sharedInstance = getSingleton(beanName);
+		Object sharedInstance = getSingleton(beanName);// 循环依赖1.检查A在不在单例池 // 13 检查B在不在单例池
 		if (sharedInstance != null && args == null) {
 			// 找到缓存的实例（可能是正在创建中的实例，用于解决循环依赖）
 			if (logger.isTraceEnabled()) {
@@ -298,7 +298,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 
 			// 3.3 标记 bean 为已创建（如果不是仅类型检查）
 			if (!typeCheckOnly) {
-				markBeanAsCreated(beanName);
+				markBeanAsCreated(beanName);// 循环依赖4. 标记A正在创建// 17 标记B正在创建
 			}
 
 			// 3.4 开始创建 bean（性能监控）
@@ -337,7 +337,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 
 				// 4.1 单例作用域
 				if (mbd.isSingleton()) {
-					sharedInstance = getSingleton(beanName, () -> {
+					sharedInstance = getSingleton(beanName, () -> {// 循环依赖5.开始创建A // 18开始创建B
 						try {
 							return createBean(beanName, mbd, args);
 						} catch (BeansException ex) {

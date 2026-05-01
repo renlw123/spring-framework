@@ -701,7 +701,7 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 
 		// ============ 步骤4：常规创建 bean（核心流程）============
 		try {
-			Object beanInstance = doCreateBean(beanName, mbdToUse, args);
+			Object beanInstance = doCreateBean(beanName, mbdToUse, args);// 循环依赖9 // 循环依赖22 // 循环依赖15.B实例化结束
 			if (logger.isTraceEnabled()) {
 				logger.trace("Finished creating instance of bean '" + beanName + "'");
 			}
@@ -739,7 +739,7 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		}
 		if (instanceWrapper == null) {
 			// 真正创建 Bean 实例：通过构造函数或工厂方法
-			instanceWrapper = createBeanInstance(beanName, mbd, args);
+			instanceWrapper = createBeanInstance(beanName, mbd, args);// 循环依赖9.创建A对象实例 // 22 创建B对象实例
 		}
 		Object bean = instanceWrapper.getWrappedInstance();  // 原始 Bean 实例
 		Class<?> beanType = instanceWrapper.getWrappedClass();
@@ -773,7 +773,8 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 			}
 			// 将 Bean 的早期引用（一个 ObjectFactory）注册到三级缓存
 			// 这样其他 Bean 在循环依赖时可以先拿到这个半成品引用
-			addSingletonFactory(beanName, () -> getEarlyBeanReference(beanName, mbd, bean));
+			addSingletonFactory(beanName, () -> getEarlyBeanReference(beanName, mbd, bean));// 循环依赖10.向三级缓存中放入A的lambda表达式getEarlyBeanReference并且早期的实例池remove一下bean（这里的三级缓存也是一个后置处理器，如果我们自定义了就会执行我们自己的）
+																							// 循环依赖23.向三级缓存中放入B的lambda表达式getEarlyBeanReference并且早期的实例池remove一下bean（这里的三级缓存也是一个后置处理器，如果我们自定义了就会执行我们自己的）
 		}
 
 		// ============ 步骤4：初始化 Bean 实例 ============
@@ -781,11 +782,11 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		try {
 			// 4.1 填充属性（依赖注入）
 			// 这里会处理 @Autowired、@Resource、@Value 等注解
-			populateBean(beanName, mbd, instanceWrapper);
+			populateBean(beanName, mbd, instanceWrapper);// 循环依赖11 // 39回到向A实例中赋值B
 
 			// 4.2 执行初始化
 			// 包括：Aware 方法回调、@PostConstruct、init-method、BeanPostProcessor 等
-			exposedObject = initializeBean(beanName, exposedObject, mbd);
+			exposedObject = initializeBean(beanName, exposedObject, mbd);// 循环依赖 32 B赋值结束初始化
 		} catch (Throwable ex) {
 			if (ex instanceof BeanCreationException && beanName.equals(((BeanCreationException) ex).getBeanName())) {
 				throw (BeanCreationException) ex;
@@ -798,7 +799,7 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		// ============ 步骤5：循环依赖的最终处理 ============
 		if (earlySingletonExposure) {
 			// 获取早期暴露的 Bean 引用（从二级缓存中）
-			Object earlySingletonReference = getSingleton(beanName, false);
+			Object earlySingletonReference = getSingleton(beanName, false);// 循环依赖14. // 40 至此完成A与B的循环引用
 			if (earlySingletonReference != null) {
 				// 如果早期引用存在，说明发生了循环依赖
 				if (exposedObject == bean) {
@@ -1722,7 +1723,7 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 			}
 			for (InstantiationAwareBeanPostProcessor bp : getBeanPostProcessorCache().instantiationAware) {
 				// 优先使用postProcessProperties（新方法，Spring 5.1+推荐）
-				PropertyValues pvsToUse = bp.postProcessProperties(pvs, bw.getWrappedInstance(), beanName);
+				PropertyValues pvsToUse = bp.postProcessProperties(pvs, bw.getWrappedInstance(), beanName);// 循环依赖11.A的AutowiredAnnotationBeanPostProcessor开始赋值 // 24 B的AutowiredAnnotationBeanPostProcessor开始赋值
 				if (pvsToUse == null) {
 					// 降级使用postProcessPropertyValues（已过时的方法，为了向后兼容）
 					if (filteredPds == null) {

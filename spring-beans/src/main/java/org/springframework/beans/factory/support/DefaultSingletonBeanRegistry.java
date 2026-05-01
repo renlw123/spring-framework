@@ -321,17 +321,17 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 	protected Object getSingleton(String beanName, boolean allowEarlyReference) {
 		// 第一步：快速检查现有实例，避免加完整的单例锁（性能优化）
 		// 从一级缓存（singletonObjects）获取：存放已经完全创建好的单例对象
-		Object singletonObject = this.singletonObjects.get(beanName);
+		Object singletonObject = this.singletonObjects.get(beanName);// 循环依赖2.单例池中没有A // 14单例池中没有B // 26 获取A还是没有 // 33 获取B还是没有 // 41 获取A还是没有
 
 		// 如果一级缓存中没有，并且当前 bean 正在创建中（说明可能发生了循环依赖）
-		if (singletonObject == null && isSingletonCurrentlyInCreation(beanName)) {
+		if (singletonObject == null && isSingletonCurrentlyInCreation(beanName)) {// 循环依赖3.正在创建池中也没有A // 15 正在创建池中没有B // 27 正在创建池中有A  // 34 但是B确实正在创建 // 42 正在创建池中有A
 
 			// 第二步：从二级缓存（earlySingletonObjects）获取
 			// 二级缓存存放的是提前暴露的早期引用对象（尚未完成属性注入和初始化）
-			singletonObject = this.earlySingletonObjects.get(beanName);
+			singletonObject = this.earlySingletonObjects.get(beanName);// 28 获取到早期的A实例，但是这时候还没有A实例 // 35 获取B但是这里有A没有B(注意这里不允许循环引用，所以下面if进不去) // 43 早期池里面有A（注意这里不允许循环引用）
 
 			// 如果二级缓存中也没有，并且允许创建早期引用
-			if (singletonObject == null && allowEarlyReference) {
+			if (singletonObject == null && allowEarlyReference) {// 29 以下代码允许早期引用，从三级工厂中获取A的那个lambda表达式获取A实例并从三级缓存中移动到二级缓存（早期引用池）
 
 				// 第三步：加锁同步，保证线程安全
 				// 使用 singletonObjects 作为锁对象，与其他单例操作保持一致性
@@ -365,7 +365,7 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 		}
 
 		// 返回找到的单例对象，可能为 null
-		return singletonObject;
+		return singletonObject;// 循环依赖16.正在创建池中没有B，直接返回 // 30 返回早期的A实例 // 36 获取不到早期的B实例并且不允许循环引用，返回null // 44 返回早期池的A实例
 	}
 
 	/**
@@ -382,7 +382,7 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 		// 使用单例对象缓存作为锁，保证线程安全
 		synchronized (this.singletonObjects) {
 			// ============ 步骤1：再次检查缓存（双重检查锁模式）============
-			Object singletonObject = this.singletonObjects.get(beanName);
+			Object singletonObject = this.singletonObjects.get(beanName);// 循环依赖6. 再次判断单例池中有没有A，没有A // 19 再次判断单例池中有没有B
 			if (singletonObject == null) {
 
 				// ============ 步骤2：检查容器是否正在销毁 ============
@@ -399,7 +399,7 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 				// ============ 步骤3：创建前回调 ============
 				// 将 beanName 添加到 singletonsCurrentlyInCreation 集合中
 				// 标记这个单例正在创建中（用于检测循环依赖）
-				beforeSingletonCreation(beanName);
+				beforeSingletonCreation(beanName);// 循环依赖7. 标记A单实例正在创建 // 20 标记B单实例正在创建
 
 				boolean newSingleton = false;
 				boolean recordSuppressedExceptions = (this.suppressedExceptions == null);
@@ -410,7 +410,7 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 				try {
 					// ============ 步骤4：调用工厂方法创建 bean ============
 					// 这里的 singletonFactory.getObject() 实际会调用 createBean()
-					singletonObject = singletonFactory.getObject();
+					singletonObject = singletonFactory.getObject();// 循环依赖8. 执行lambda表达式创建A实例 // 21执行lambda表达式创建B实例
 					newSingleton = true;
 				} catch (IllegalStateException ex) {
 					// 并发情况：其他线程可能已经创建了该单例
@@ -430,7 +430,7 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 				} finally {
 					// ============ 步骤5：创建后回调 ============
 					// 从 singletonsCurrentlyInCreation 集合中移除 beanName
-					afterSingletonCreation(beanName);
+					afterSingletonCreation(beanName);// 循环依赖 37. 移除B的单实例创建状态 // 45移除A的单实例创建状态
 					if (recordSuppressedExceptions) {
 						this.suppressedExceptions = null;
 					}
@@ -438,7 +438,7 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 
 				// ============ 步骤6：注册新创建的单例 ============
 				if (newSingleton) {
-					addSingleton(beanName, singletonObject);
+					addSingleton(beanName, singletonObject);// 循环依赖 38.向单例池中放入B实例并且在工厂池（三级缓存）移除B //46 向单例池中放入A实例并移除其他池中的A实例
 				}
 			}
 			return singletonObject;
@@ -517,11 +517,20 @@ public class DefaultSingletonBeanRegistry extends SimpleAliasRegistry implements
 	}
 
 	/**
-	 * Return whether the specified singleton bean is currently in creation
-	 * (within the entire factory).
-	 * @param beanName the name of the bean
+	 * 判断指定的单例 bean 当前是否正在创建过程中（在整个 BeanFactory 范围内）。
+	 * <p>该检查用于检测循环依赖场景：当检测到 bean 正在被创建时再次被请求，
+	 * 通常意味着存在构造器循环依赖（无法通过提前暴露来解决的情况）。
+	 *
+	 * @param beanName bean 的名称，可以为 null（如果为 null 则直接返回 false）
+	 * @return true 表示该 bean 当前正在被创建，false 表示未在创建或不存在
+	 *
+	 * @see #registerSingletonCurrentlyInCreation(String)
+	 * @see #removeSingletonCurrentlyInCreation(String)
+	 * @see DefaultSingletonBeanRegistry#singletonsCurrentlyInCreation
 	 */
 	public boolean isSingletonCurrentlyInCreation(@Nullable String beanName) {
+		// singletonsCurrentlyInCreation 是一个 Set<String>，用于记录当前正在创建的单例 bean 名称
+		// 若 beanName 为 null，contains 方法会正常返回 false（集合通常不支持 null 元素）
 		return this.singletonsCurrentlyInCreation.contains(beanName);
 	}
 
