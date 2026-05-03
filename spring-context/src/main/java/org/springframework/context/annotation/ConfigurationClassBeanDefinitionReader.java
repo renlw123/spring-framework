@@ -120,40 +120,58 @@ class ConfigurationClassBeanDefinitionReader {
 
 
 	/**
-	 * Read {@code configurationModel}, registering bean definitions
-	 * with the registry based on its contents.
+	 * 读取 {@code configurationModel} 中的配置，并基于其内容向注册表中注册 Bean 定义。
+	 *
+	 * @param configurationModel 一组配置类，这些类已经过解析，包含了需要注册的 Bean 定义信息
 	 */
 	public void loadBeanDefinitions(Set<ConfigurationClass> configurationModel) {
+		// 创建条件评估器，用于处理 @Conditional 等条件注解
+		// 它会跟踪条件评估的结果，避免重复评估
 		TrackedConditionEvaluator trackedConditionEvaluator = new TrackedConditionEvaluator();
+
+		// 遍历每个配置类，逐个处理其中的 Bean 定义
 		for (ConfigurationClass configClass : configurationModel) {
+			// 为当前配置类加载 Bean 定义，传入条件评估器以处理条件配置
 			loadBeanDefinitionsForConfigurationClass(configClass, trackedConditionEvaluator);
 		}
 	}
 
 	/**
-	 * Read a particular {@link ConfigurationClass}, registering bean definitions
-	 * for the class itself and all of its {@link Bean} methods.
+	 * 读取指定的 {@link ConfigurationClass}，为其本身及其所有 {@link Bean} 方法注册 Bean 定义。
+	 *
+	 * @param configClass               配置类，包含需要注册的 Bean 定义信息
+	 * @param trackedConditionEvaluator 条件评估器，用于判断配置类是否应被跳过
 	 */
 	private void loadBeanDefinitionsForConfigurationClass(
 			ConfigurationClass configClass, TrackedConditionEvaluator trackedConditionEvaluator) {
 
+		// 1. 检查该配置类是否应被跳过（例如：@Conditional 条件不满足）
 		if (trackedConditionEvaluator.shouldSkip(configClass)) {
+			// 获取配置类的 Bean 名称
 			String beanName = configClass.getBeanName();
+			// 如果 Bean 名称有效且注册表中已存在该 Bean 定义，则将其移除
 			if (StringUtils.hasLength(beanName) && this.registry.containsBeanDefinition(beanName)) {
 				this.registry.removeBeanDefinition(beanName);
 			}
+			// 同时从导入注册表中移除该类，表示该类不会被注册
 			this.importRegistry.removeImportingClass(configClass.getMetadata().getClassName());
-			return;
+			return; // 跳过处理，直接返回
 		}
 
+		// 2. 如果该配置类是被其他类导入的（例如通过 @Import），则需要注册其自身的 Bean 定义
 		if (configClass.isImported()) {
 			registerBeanDefinitionForImportedConfigurationClass(configClass);
 		}
+
+		// 3. 遍历所有 @Bean 方法，为每个方法注册对应的 Bean 定义
 		for (BeanMethod beanMethod : configClass.getBeanMethods()) {
 			loadBeanDefinitionsForBeanMethod(beanMethod);
 		}
 
+		// 4. 从导入的资源文件中加载 Bean 定义（例如：@ImportResource）
 		loadBeanDefinitionsFromImportedResources(configClass.getImportedResources());
+
+		// 5. 从导入的 ImportBeanDefinitionRegistrar 中加载 Bean 定义
 		loadBeanDefinitionsFromRegistrars(configClass.getImportBeanDefinitionRegistrars());
 	}
 
@@ -391,8 +409,23 @@ class ConfigurationClassBeanDefinitionReader {
 		});
 	}
 
+	/**
+	 * 从所有 ImportBeanDefinitionRegistrar 中加载 Bean 定义。
+	 *
+	 * <p>ImportBeanDefinitionRegistrar 是一种编程式注册 Bean 定义的机制，
+	 * 通常与 @Import 注解配合使用，允许用户以编程方式动态地向容器注册 Bean。
+	 *
+	 * @param registrars 一个 Map，键为 ImportBeanDefinitionRegistrar 实例，
+	 *                   值为该注册器所关联的配置类的注解元数据
+	 */
 	private void loadBeanDefinitionsFromRegistrars(Map<ImportBeanDefinitionRegistrar, AnnotationMetadata> registrars) {
+		// 遍历所有注册器，调用每个注册器的 registerBeanDefinitions 方法
 		registrars.forEach((registrar, metadata) ->
+				// 执行注册器的注册逻辑
+				// 参数说明：
+				//   metadata - 导入该注册器的配置类的注解元数据
+				//   this.registry - Spring 的 Bean 定义注册表，用于实际注册 Bean
+				//   this.importBeanNameGenerator - Bean 名称生成器，用于生成 Bean 的名称
 				registrar.registerBeanDefinitions(metadata, this.registry, this.importBeanNameGenerator));
 	}
 

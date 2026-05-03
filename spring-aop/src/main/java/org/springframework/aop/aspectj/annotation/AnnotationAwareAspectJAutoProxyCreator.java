@@ -75,38 +75,116 @@ public class AnnotationAwareAspectJAutoProxyCreator extends AspectJAwareAdvisorA
 		this.aspectJAdvisorFactory = aspectJAdvisorFactory;
 	}
 
+	/**
+	 * 初始化 BeanFactory，设置 AspectJ 相关的组件。
+	 *
+	 * <p>该方法在代理创建器被创建后调用，用于初始化：
+	 * <ul>
+	 *   <li>aspectJAdvisorFactory：切面通知工厂，负责解析 @AspectJ 注解的方法</li>
+	 *   <li>aspectJAdvisorsBuilder：切面通知构建器，负责从 BeanFactory 中提取所有切面</li>
+	 * </ul>
+	 *
+	 * AbstractApplicationContext.refresh()
+	 *     │
+	 *     ├── 1. invokeBeanFactoryPostProcessors()    ← 处理 BeanFactoryPostProcessor
+	 *     │
+	 *     ├── 2. registerBeanPostProcessors()         ← ★ 这里注册 BeanPostProcessor
+	 *     │       │
+	 *     │       └── PostProcessorRegistrationDelegate.registerBeanPostProcessors()
+	 *     │               │
+	 *     │               ├── 创建所有 BeanPostProcessor 的实例
+	 *     │               │
+	 *     │               └── 对于每个 PriorityOrdered BeanPostProcessor：
+	 *     │                     │
+	 *     │                     └── beanFactory.addBeanPostProcessor(processor)
+	 *     │                                 │
+	 *     │                                 └── AbstractAutoProxyCreator.setBeanFactory()
+	 *     │                                           │
+	 *     │                                           └── ★ initBeanFactory() 被调用
+	 *     │
+	 *     ├── 3. finishBeanFactoryInitialization()    ← 实例化所有单例 Bean
+	 *     │
+	 *     └── 4. finishRefresh()
+	 *
+	 * @param beanFactory Spring 的 BeanFactory，用于获取和管理 Bean
+	 */
 	@Override
-	protected void initBeanFactory(ConfigurableListableBeanFactory beanFactory) {
+	protected void initBeanFactory(ConfigurableListableBeanFactory beanFactory) {// 在初始化期间initializeBean准备好了要用的基本对象ReflectiveAspectJAdvisorFactory
+																				 // + BeanFactoryAspectJAdvisorsBuilderAdapter
+		// 调用父类初始化方法（AbstractAutoProxyCreator）
 		super.initBeanFactory(beanFactory);
+
+		// 如果切面通知工厂尚未创建，则创建一个新的
+		// ReflectiveAspectJAdvisorFactory 通过反射解析 @AspectJ 注解
 		if (this.aspectJAdvisorFactory == null) {
 			this.aspectJAdvisorFactory = new ReflectiveAspectJAdvisorFactory(beanFactory);
 		}
+
+		// 创建切面通知构建器适配器
+		// 该构建器负责扫描容器中所有带有 @Aspect 注解的 Bean，
+		// 并将其中的 @Before、@After、@Around 等方法解析为 Advisor 对象
 		this.aspectJAdvisorsBuilder =
 				new BeanFactoryAspectJAdvisorsBuilderAdapter(beanFactory, this.aspectJAdvisorFactory);
 	}
 
 
+	/**
+	 * 查找所有候选的切面通知（Advisor）。
+	 *
+	 * <p>该方法会收集两类通知：
+	 * <ol>
+	 *   <li>Spring 原生 Advisor：通过父类的查找规则找到的普通 Advisor</li>
+	 *   <li>AspectJ 切面通知：将所有 @AspectJ 切面类中的通知方法解析为 Advisor</li>
+	 * </ol>
+	 *
+	 * @return 所有候选通知的列表（包括 Spring Advisor 和 AspectJ 通知）
+	 */
 	@Override
 	protected List<Advisor> findCandidateAdvisors() {
-		// Add all the Spring advisors found according to superclass rules.
+		// ========== 第一部分：查找 Spring 原生 Advisor ==========
+		// 调用父类方法，获取通过其他方式注册的 Advisor
+		// 例如：实现 Advisor 接口的 Bean、通过 XML 配置的切面等
 		List<Advisor> advisors = super.findCandidateAdvisors();
-		// Build Advisors for all AspectJ aspects in the bean factory.
+
+		// ========== 第二部分：构建 AspectJ 切面通知 ==========
+		// 如果切面通知构建器存在，则解析所有 @AspectJ 切面类
 		if (this.aspectJAdvisorsBuilder != null) {
+			// 将 @AspectJ 切面中的方法转换为 Advisor 并添加到列表中
+			// 例如：@Before、@After、@Around、@AfterReturning、@AfterThrowing
 			advisors.addAll(this.aspectJAdvisorsBuilder.buildAspectJAdvisors());
 		}
+
 		return advisors;
 	}
 
+	/**
+	 * 判断一个类是否为基础设施类（不应被代理）。
+	 *
+	 * <p>基础设施类包括：
+	 * <ul>
+	 *   <li>Spring 内部的基础设施类（如 BeanPostProcessor、AOP 相关类）</li>
+	 *   <li>{@link Aspect} 切面类本身</li>
+	 * </ul>
+	 *
+	 * <p><b>为什么切面类不应被代理？</b>
+	 * <pre>
+	 * 如果切面类被代理，当切面实现了某些接口（如 Ordered）时：
+	 * 1. JDK 动态代理会基于接口生成代理对象
+	 * 2. 代理对象只包含接口中定义的方法
+	 * 3. 切面中的通知方法（@Before 等）不在接口中
+	 * 4. 运行时调用通知方法会失败
+	 *
+	 * 因此，切面类本身不需要被 AOP 增强，也不应该被代理。
+	 * </pre>
+	 *
+	 * @param beanClass 要检查的 Bean 的 Class
+	 * @return true 表示是基础设施类，不应被代理；false 表示可能需要被代理
+	 */
 	@Override
 	protected boolean isInfrastructureClass(Class<?> beanClass) {
-		// Previously we setProxyTargetClass(true) in the constructor, but that has too
-		// broad an impact. Instead we now override isInfrastructureClass to avoid proxying
-		// aspects. I'm not entirely happy with that as there is no good reason not
-		// to advise aspects, except that it causes advice invocation to go through a
-		// proxy, and if the aspect implements e.g the Ordered interface it will be
-		// proxied by that interface and fail at runtime as the advice method is not
-		// defined on the interface. We could potentially relax the restriction about
-		// not advising aspects in the future.
+		// 满足以下任一条件即为基础设施类：
+		// 1. 父类判定为基础设施类（如 AopInfrastructureBean 的实现类）
+		// 2. 该类是一个切面类（带有 @Aspect 注解）
 		return (super.isInfrastructureClass(beanClass) ||
 				(this.aspectJAdvisorFactory != null && this.aspectJAdvisorFactory.isAspect(beanClass)));
 	}
