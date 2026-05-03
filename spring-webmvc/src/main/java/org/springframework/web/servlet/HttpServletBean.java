@@ -140,22 +140,34 @@ public abstract class HttpServletBean extends HttpServlet implements Environment
 	}
 
 	/**
-	 * Map config parameters onto bean properties of this servlet, and
-	 * invoke subclass initialization.
-	 * @throws ServletException if bean properties are invalid (or required
-	 * properties are missing), or if subclass initialization fails.
+	 * 将配置参数映射到 Servlet 的 Bean 属性上，并调用子类初始化方法。
+	 *
+	 * <p>这是 Spring 框架中 {@link HttpServletBean} 的核心方法，
+	 * 用于将 web.xml 或注解中的 Servlet 初始化参数注入到 Servlet 的属性中。
+	 *
+	 * @throws ServletException 如果 Bean 属性无效（或缺少必需属性），或子类初始化失败
 	 */
 	@Override
 	public final void init() throws ServletException {
 
-		// Set bean properties from init parameters.
+		// ========== 第一步：将 init-param 映射为 Bean 属性 ==========
+		// 从 ServletConfig 中获取初始化参数，封装成 PropertyValues
+		// requiredProperties 是子类声明的必需属性（如 FrameworkServlet 的 contextConfigLocation）
 		PropertyValues pvs = new ServletConfigPropertyValues(getServletConfig(), this.requiredProperties);
+
 		if (!pvs.isEmpty()) {
 			try {
+				// 创建 BeanWrapper 用于属性绑定（类似 Spring 的依赖注入机制）
 				BeanWrapper bw = PropertyAccessorFactory.forBeanPropertyAccess(this);
+
+				// 注册 Resource 类型的属性编辑器，支持 ServletContext 下的资源解析
 				ResourceLoader resourceLoader = new ServletContextResourceLoader(getServletContext());
 				bw.registerCustomEditor(Resource.class, new ResourceEditor(resourceLoader, getEnvironment()));
+
+				// 扩展点：子类可以覆盖此方法自定义属性编辑器
 				initBeanWrapper(bw);
+
+				// 执行属性注入（将 init-param 设置到 Servlet 的对应字段上）
 				bw.setPropertyValues(pvs, true);
 			}
 			catch (BeansException ex) {
@@ -166,7 +178,8 @@ public abstract class HttpServletBean extends HttpServlet implements Environment
 			}
 		}
 
-		// Let subclasses do whatever initialization they like.
+		// ========== 第二步：子类自定义初始化 ==========
+		// 模板方法模式：交给子类（如 FrameworkServlet、DispatcherServlet）实现具体初始化逻辑
 		initServletBean();
 	}
 

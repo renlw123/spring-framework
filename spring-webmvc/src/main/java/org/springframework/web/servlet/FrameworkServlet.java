@@ -515,11 +515,14 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 
 
 	/**
-	 * Overridden method of {@link HttpServletBean}, invoked after any bean properties
-	 * have been set. Creates this servlet's WebApplicationContext.
+	 * 重写自 {@link HttpServletBean} 的方法，在 Bean 属性设置完成后被调用。
+	 * 创建此 Servlet 的 WebApplicationContext。
+	 *
+	 * <p>这是 FrameworkServlet 的核心初始化方法，负责创建和刷新 Spring Web 容器。
 	 */
 	@Override
 	protected final void initServletBean() throws ServletException {
+		// ========== 1. 日志记录：初始化开始 ==========
 		getServletContext().log("Initializing Spring " + getClass().getSimpleName() + " '" + getServletName() + "'");
 		if (logger.isInfoEnabled()) {
 			logger.info("Initializing Servlet '" + getServletName() + "'");
@@ -527,7 +530,12 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 		long startTime = System.currentTimeMillis();
 
 		try {
+			// ========== 2. ★ 核心：初始化 WebApplicationContext ==========
+			// 创建或刷新 Spring 容器（即 IoC 容器）
 			this.webApplicationContext = initWebApplicationContext();
+
+			// ========== 3. 模板方法：留给子类扩展 ==========
+			// FrameworkServlet 中为空实现，DispatcherServlet 会重写此方法
 			initFrameworkServlet();
 		}
 		catch (ServletException | RuntimeException ex) {
@@ -535,6 +543,7 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 			throw ex;
 		}
 
+		// ========== 4. 日志：请求参数/头信息处理策略 ==========
 		if (logger.isDebugEnabled()) {
 			String value = this.enableLoggingRequestDetails ?
 					"shown which may lead to unsafe logging of potentially sensitive data" :
@@ -543,6 +552,7 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 					"': request parameters and headers will be " + value);
 		}
 
+		// ========== 5. 日志记录：初始化完成 ==========
 		if (logger.isInfoEnabled()) {
 			logger.info("Completed initialization in " + (System.currentTimeMillis() - startTime) + " ms");
 		}

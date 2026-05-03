@@ -69,6 +69,50 @@ import org.springframework.web.util.ServletRequestPathUtils;
 import org.springframework.web.util.WebUtils;
 
 /**
+ *
+ *
+ * Tomcat 启动,会为每一个Servlet创建对象，
+ *     │
+ *     ▼
+ * DispatcherServlet 实例化
+ *     │
+ *     ▼
+ * HttpServletBean.init()  ← 从 web.xml 注入 init-param
+ *     │
+ *     ▼
+ * ┌─────────────────────────────────────────────────────────────┐
+ * │  FrameworkServlet.initServletBean()  ★ 当前方法             │
+ * │                                                             │
+ * │  ┌───────────────────────────────────────────────────────┐  │
+ * │  │ 1. 记录开始日志                                        │  │
+ * │  └───────────────────────────────────────────────────────┘  │
+ * │                          │                                   │
+ * │                          ▼                                   │
+ * │  ┌───────────────────────────────────────────────────────┐  │
+ * │  │ 2. initWebApplicationContext()                        │  │
+ * │  │    • 查找或创建父容器（ContextLoaderListener 创建的）   │  │
+ * │  │    • 创建子容器（当前 Servlet 专用的 WebApplicationContext）│  │
+ * │  │    • 刷新容器 → loadBeanDefinitions() → 创建所有 Bean  │  │
+ * │  └───────────────────────────────────────────────────────┘  │
+ * │                          │                                   │
+ * │                          ▼                                   │
+ * │  ┌───────────────────────────────────────────────────────┐  │
+ * │  │ 3. initFrameworkServlet()                             │  │
+ * │  │    • FrameworkServlet 中为空实现                       │  │
+ * │  │    • DispatcherServlet 重写为 initStrategies()        │  │
+ * │  │      → 初始化 HandlerMapping、HandlerAdapter 等组件   │  │
+ * │  └───────────────────────────────────────────────────────┘  │
+ * │                          │                                   │
+ * │                          ▼                                   │
+ * │  ┌───────────────────────────────────────────────────────┐  │
+ * │  │ 4. 记录完成日志（耗时统计）                            │  │
+ * │  └───────────────────────────────────────────────────────┘  │
+ * └─────────────────────────────────────────────────────────────┘
+ *     │
+ *     ▼
+ * Servlet 就绪，等待处理请求
+ *
+ *
  * Central dispatcher for HTTP request handlers/controllers, e.g. for web UI controllers
  * or HTTP-based remote service exporters. Dispatches to registered handlers for processing
  * a web request, providing convenient mapping and exception handling facilities.
