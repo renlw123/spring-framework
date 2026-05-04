@@ -559,60 +559,102 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 	}
 
 	/**
-	 * Initialize and publish the WebApplicationContext for this servlet.
-	 * <p>Delegates to {@link #createWebApplicationContext} for actual creation
-	 * of the context. Can be overridden in subclasses.
-	 * @return the WebApplicationContext instance
+	 * 初始化并发布当前Servlet的WebApplicationContext。
+	 * <p>实际创建context的工作委托给 {@link #createWebApplicationContext} 方法。
+	 * 子类可以重写此方法以提供自定义行为。
+	 * @return WebApplicationContext实例
 	 * @see #FrameworkServlet(WebApplicationContext)
 	 * @see #setContextClass
 	 * @see #setContextConfigLocation
 	 */
 	protected WebApplicationContext initWebApplicationContext() {
+		// 1. 获取根WebApplicationContext（通常由ContextLoaderListener创建，存在于ServletContext中）
 		WebApplicationContext rootContext =
 				WebApplicationContextUtils.getWebApplicationContext(getServletContext());
 		WebApplicationContext wac = null;
 
+		// 2. 情况一：当前Servlet在构造时已经被注入了WebApplicationContext实例（通过构造方法注入）
 		if (this.webApplicationContext != null) {
-			// A context instance was injected at construction time -> use it
+			// 直接使用注入的实例
 			wac = this.webApplicationContext;
 			if (wac instanceof ConfigurableWebApplicationContext) {
 				ConfigurableWebApplicationContext cwac = (ConfigurableWebApplicationContext) wac;
+				// 如果context尚未刷新（未激活），则进行配置和刷新操作
 				if (!cwac.isActive()) {
-					// The context has not yet been refreshed -> provide services such as
-					// setting the parent context, setting the application context id, etc
+					// 若没有设置父context，则将根rootContext设置为父context
+					//┌─────────────────────────────────────┐
+					//│    父容器 (Root WebApplicationContext)  │
+					//│  - Service, Repository, DataSource   │
+					//│  - @Service, @Repository, @Component │
+					//└─────────────────┬───────────────────┘
+					//                  │ 继承（父子关系）
+					//                  ▼
+					//┌─────────────────────────────────────┐
+					//│  子容器 (Servlet WebApplicationContext) │
+					//│  - Controller, HandlerMapping        │
+					//│  - @Controller, @RequestMapping      │
+					//└─────────────────────────────────────┘
+					//// 父容器配置
+					//@Configuration
+					//@ComponentScan(basePackages = "com.example.service")
+					//public class RootConfig { }
+					//
+					//// 子容器配置
+					//@Configuration
+					//@ComponentScan(basePackages = "com.example.controller")
+					//@EnableWebMvc
+					//public class ServletConfig { }
+					//
+					//// 初始化
+					//public class MyWebAppInitializer implements WebApplicationInitializer {
+					//    @Override
+					//    public void onStartup(ServletContext container) {
+					//        // 父容器
+					//        AnnotationConfigWebApplicationContext rootContext = new AnnotationConfigWebApplicationContext();
+					//        rootContext.register(RootConfig.class);
+					//        container.addListener(new ContextLoaderListener(rootContext));
+					//
+					//        // 子容器
+					//        AnnotationConfigWebApplicationContext servletContext = new AnnotationConfigWebApplicationContext();
+					//        servletContext.register(ServletConfig.class);
+					//        servletContext.setParent(rootContext);  // 设置父子关系
+					//
+					//        DispatcherServlet servlet = new DispatcherServlet(servletContext);
+					//        ServletRegistration.Dynamic dynamic = container.addServlet("dispatcher", servlet);
+					//        dynamic.addMapping("/");
+					//    }
+					//}
 					if (cwac.getParent() == null) {
-						// The context instance was injected without an explicit parent -> set
-						// the root application context (if any; may be null) as the parent
 						cwac.setParent(rootContext);
 					}
+					// 配置并刷新这个WebApplicationContext
 					configureAndRefreshWebApplicationContext(cwac);
 				}
 			}
 		}
+
+		// 3. 情况二：通过构造方法未注入context，则尝试从ServletContext中查找是否有已注册的context（按属性名查找）
 		if (wac == null) {
-			// No context instance was injected at construction time -> see if one
-			// has been registered in the servlet context. If one exists, it is assumed
-			// that the parent context (if any) has already been set and that the
-			// user has performed any initialization such as setting the context id
 			wac = findWebApplicationContext();
 		}
+
+		// 4. 情况三：未找到任何现有的context，则创建一个本地的WebApplicationContext
 		if (wac == null) {
-			// No context instance is defined for this servlet -> create a local one
 			wac = createWebApplicationContext(rootContext);
 		}
 
+		// 5. 如果尚未接收到刷新事件（refreshEventReceived为false）
+		//    （可能是context不是ConfigurableApplicationContext，或者注入的context在注入时已经刷新过）
+		//    则手动触发onRefresh回调方法，用于执行Spring MVC组件的初始化（如HandlerMapping、HandlerAdapter、ViewResolver等）
 		if (!this.refreshEventReceived) {
-			// Either the context is not a ConfigurableApplicationContext with refresh
-			// support or the context injected at construction time had already been
-			// refreshed -> trigger initial onRefresh manually here.
 			synchronized (this.onRefreshMonitor) {
 				onRefresh(wac);
 			}
 		}
 
+		// 6. 如果需要将当前WebApplicationContext发布到ServletContext的属性中（通常是用于其他组件获取）
 		if (this.publishContext) {
-			// Publish the context as a servlet context attribute.
-			String attrName = getServletContextAttributeName();
+			String attrName = getServletContextAttributeName();  // 属性名通常为：org.springframework.web.servlet.FrameworkServlet.CONTEXT.当前Servlet名称
 			getServletContext().setAttribute(attrName, wac);
 		}
 
@@ -644,85 +686,257 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 	}
 
 	/**
-	 * Instantiate the WebApplicationContext for this servlet, either a default
-	 * {@link org.springframework.web.context.support.XmlWebApplicationContext}
-	 * or a {@link #setContextClass custom context class}, if set.
-	 * <p>This implementation expects custom contexts to implement the
-	 * {@link org.springframework.web.context.ConfigurableWebApplicationContext}
-	 * interface. Can be overridden in subclasses.
-	 * <p>Do not forget to register this servlet instance as application listener on the
-	 * created context (for triggering its {@link #onRefresh callback}), and to call
-	 * {@link org.springframework.context.ConfigurableApplicationContext#refresh()}
-	 * before returning the context instance.
-	 * @param parent the parent ApplicationContext to use, or {@code null} if none
-	 * @return the WebApplicationContext for this servlet
+	 * 为当前 Servlet 实例化 WebApplicationContext（子容器）。
+	 *
+	 * <p>这是 Spring MVC 父子容器体系中**子容器创建的核心实现**。
+	 * 父容器（Root WebApplicationContext）由 ContextLoaderListener 创建，
+	 * 而子容器（Servlet WebApplicationContext）由此方法创建。
+	 *
+	 * <p>容器类型可以是：
+	 * <ul>
+	 *   <li>默认的 {@link org.springframework.web.context.support.XmlWebApplicationContext}</li>
+	 *   <li>通过 {@link #setContextClass} 设置的自定义上下文类</li>
+	 * </ul>
+	 *
+	 * <p>此实现要求自定义上下文类必须实现
+	 * {@link org.springframework.web.context.ConfigurableWebApplicationContext} 接口。
+	 * 子类可以重写此方法以提供自定义的创建逻辑。
+	 *
+	 * <p><b>重要：</b>
+	 * <ul>
+	 *   <li>不要忘记将当前 Servlet 实例注册为创建的应用上下文的监听器
+	 *       （用于触发生命周期回调 {@link #onRefresh}）</li>
+	 *   <li>在返回上下文实例之前，必须调用
+	 *       {@link org.springframework.context.ConfigurableApplicationContext#refresh()}</li>
+	 * </ul>
+	 *
+	 * @param parent 要使用的父 ApplicationContext（即根容器），如果没有则为 {@code null}
+	 * @return 为当前 Servlet 创建的 WebApplicationContext（子容器）
 	 * @see org.springframework.web.context.support.XmlWebApplicationContext
 	 */
 	protected WebApplicationContext createWebApplicationContext(@Nullable ApplicationContext parent) {
+
+		// ========== 1. 获取容器类型 ==========
+		// 通过 getContextClass() 获取配置的上下文类
+		// 默认返回 XmlWebApplicationContext.class
+		// 可通过 setContextClass() 方法自定义，如 AnnotationConfigWebApplicationContext
 		Class<?> contextClass = getContextClass();
+
+		// ========== 2. 类型检查 ==========
+		// 确保容器类实现了 ConfigurableWebApplicationContext 接口
+		// 该接口提供了 Web 环境所需的核心能力：
+		//   - setServletContext(): 设置 Servlet 上下文
+		//   - setConfigLocation(): 设置配置文件位置
+		//   - refresh(): 刷新容器
 		if (!ConfigurableWebApplicationContext.class.isAssignableFrom(contextClass)) {
 			throw new ApplicationContextException(
 					"Fatal initialization error in servlet with name '" + getServletName() +
-					"': custom WebApplicationContext class [" + contextClass.getName() +
-					"] is not of type ConfigurableWebApplicationContext");
+							"': custom WebApplicationContext class [" + contextClass.getName() +
+							"] is not of type ConfigurableWebApplicationContext");
 		}
+
+		// ========== 3. 实例化容器 ==========
+		// 通过 BeanUtils 的 instantiateClass 方法创建容器实例
+		// 这类似于调用 contextClass.newInstance()，但处理了异常情况
 		ConfigurableWebApplicationContext wac =
 				(ConfigurableWebApplicationContext) BeanUtils.instantiateClass(contextClass);
 
+		// ========== 4. 设置环境 ==========
+		// 将当前 Servlet 的环境配置（如属性源、Profile 等）传递给子容器
+		// 这样子容器可以继承父容器的环境配置
 		wac.setEnvironment(getEnvironment());
+
+		// ========== 5. 🔗 建立父子关系（关键步骤） ==========
+		// 这是父子容器体系的核心：将父容器设置为子容器的父级
+		// 作用：
+		//   - 子容器可以访问父容器中的所有 Bean（如 Service、Repository）
+		//   - 父容器无法访问子容器中的 Bean（如 Controller）
+		//   - 子容器中找不到的 Bean 会委托给父容器查找
 		wac.setParent(parent);
+
+		// ========== 6. 设置配置文件位置 ==========
+		// 从 Servlet 的 init-param 中获取 contextConfigLocation
+		// 例如 web.xml 中的配置：
+		//   <init-param>
+		//       <param-name>contextConfigLocation</param-name>
+		//       <param-value>/WEB-INF/dispatcher-servlet.xml</param-value>
+		//   </init-param>
 		String configLocation = getContextConfigLocation();
 		if (configLocation != null) {
 			wac.setConfigLocation(configLocation);
 		}
+
+		// ========== 7. 配置并刷新容器 ==========
+		// 这个方法内部会：
+		//   - 设置 ServletContext
+		//   - 应用任何自定义的配置
+		//   - 🔥 调用 wac.refresh() 启动容器
+		//     refresh() 会触发：
+		//       * 加载 Bean 定义（扫描 @Controller、@Component 等）
+		//       * 实例化单例 Bean
+		//       * 初始化 MVC 组件（HandlerMapping、ViewResolver 等）
 		configureAndRefreshWebApplicationContext(wac);
 
+		// ========== 8. 返回创建好的容器 ==========
 		return wac;
 	}
 
+	/**
+	 * 配置并刷新当前 Servlet 的 WebApplicationContext（子容器）。
+	 *
+	 * <p>这是子容器启动流程中的关键方法，负责在容器刷新（refresh()）之前
+	 * 完成所有必要的配置工作。
+	 *
+	 * <p>主要职责：
+	 * <ul>
+	 *   <li>设置容器的唯一标识 ID</li>
+	 *   <li>绑定 ServletContext 和 ServletConfig</li>
+	 *   <li>设置命名空间（用于默认配置文件路径）</li>
+	 *   <li>注册上下文刷新监听器（触发 onRefresh 回调）</li>
+	 *   <li>初始化 Web 环境属性源</li>
+	 *   <li>执行后置处理和初始化器</li>
+	 *   <li>刷新容器（加载 Bean、实例化单例等）</li>
+	 * </ul>
+	 *
+	 * <p><b>注意：</b>此方法与父容器配置方法类似，但增加了 ServletConfig 的绑定
+	 * 和 ContextRefreshListener 的注册，这是子容器特有的。
+	 *
+	 * @param wac 需要配置和刷新的 WebApplicationContext（子容器）
+	 */
 	protected void configureAndRefreshWebApplicationContext(ConfigurableWebApplicationContext wac) {
+
+		// ========== 1. 设置容器的唯一标识 ID ==========
+		// 检查当前容器的 ID 是否是默认的（ObjectUtils.identityToString(wac) 返回如 "org.springframework...@1234" 格式）
 		if (ObjectUtils.identityToString(wac).equals(wac.getId())) {
-			// The application context id is still set to its original default value
-			// -> assign a more useful id based on available information
+			// 如果设置了自定义 contextId，使用自定义值
 			if (this.contextId != null) {
 				wac.setId(this.contextId);
 			}
 			else {
-				// Generate default id...
+				// 生成默认 ID：org.springframework.web.context.WebApplicationContext: + 应用路径 + / + servlet名称
+				// 例如：org.springframework.web.context.WebApplicationContext:/myapp/dispatcher
 				wac.setId(ConfigurableWebApplicationContext.APPLICATION_CONTEXT_ID_PREFIX +
 						ObjectUtils.getDisplayString(getServletContext().getContextPath()) + '/' + getServletName());
 			}
 		}
 
+		// ========== 2. 绑定 Servlet 相关对象 ==========
+		// 设置 ServletContext，让容器可以访问 Servlet 环境
 		wac.setServletContext(getServletContext());
+
+		// 设置 ServletConfig，让容器可以访问 Servlet 配置信息
+		// 例如 web.xml 中配置的 <init-param>
 		wac.setServletConfig(getServletConfig());
+
+		// 设置命名空间，用于确定默认的配置文件路径
+		// 默认命名空间是 servlet 名称，如 "dispatcher"
+		// 默认配置文件路径：/WEB-INF/[servlet-name]-servlet.xml
 		wac.setNamespace(getNamespace());
+
+		// ========== 3. 注册上下文刷新监听器 ==========
+		// 这是关键！添加一个 SourceFilteringListener 包装的 ContextRefreshListener
+		//
+		// ContextRefreshListener 的作用：
+		//   - 监听容器的刷新完成事件（ContextRefreshedEvent）
+		//   - 当容器刷新完成后，触发 FrameworkServlet 的 onRefresh() 方法
+		//   - onRefresh() 会初始化 DispatcherServlet 的核心组件（HandlerMapping、ViewResolver 等）
+		//
+		// 为什么需要 SourceFilteringListener？
+		//   - 确保只有当前容器（而非父容器）的事件才会触发回调
+		//   - 避免父容器刷新时错误地触发子 Servlet 的 onRefresh
 		wac.addApplicationListener(new SourceFilteringListener(wac, new ContextRefreshListener()));
 
-		// The wac environment's #initPropertySources will be called in any case when the context
-		// is refreshed; do it eagerly here to ensure servlet property sources are in place for
-		// use in any post-processing or initialization that occurs below prior to #refresh
+		// ========== 4. 初始化 Web 环境属性源 ==========
+		// 提前初始化属性源，确保在刷新前的后置处理中能使用 Servlet 属性源
+		//
+		// 这样做的好处：
+		//   - 可以在 Bean 定义加载阶段就使用 ServletContext 和 ServletConfig 中的属性
+		//   - 支持在 @Value 注解中使用 web.xml 配置的参数
+		//   - 支持在配置类中使用 ${...} 占位符引用 Servlet 初始化参数
 		ConfigurableEnvironment env = wac.getEnvironment();
 		if (env instanceof ConfigurableWebEnvironment) {
+			// 初始化 Web 环境属性源，会添加：
+			//   - servletContextInitParams: web.xml 中的 <context-param>
+			//   - servletConfigInitParams: web.xml 中的 <init-param>
+			//   - systemProperties: System.getProperties()
+			//   - systemEnvironment: System.getenv()
 			((ConfigurableWebEnvironment) env).initPropertySources(getServletContext(), getServletConfig());
 		}
 
+		// ========== 5. 执行后置处理（扩展点） ==========
+		// 这是一个模板方法，允许在当前类或子类中对容器进行额外的配置
+		// 例如：注册自定义的 BeanPostProcessor、添加属性源等
 		postProcessWebApplicationContext(wac);
+
+		// ========== 6. 应用应用上下文初始化器 ==========
+		// 执行所有注册的 ApplicationContextInitializer
+		// 这些初始化器可以通过 setContextInitializers() 设置
+		// 用于在容器刷新前进行额外的配置
 		applyInitializers(wac);
+
+		// ========== 7. 🔥 核心：刷新容器 ==========
+		// 这是 Spring IoC 容器的启动入口，会执行以下关键步骤：
+		//
+		// 【refresh() 内部核心流程】
+		// ┌─────────────────────────────────────────────────────────────┐
+		// │ ① prepareRefresh()          - 初始化属性源、验证环境        │
+		// │ ② obtainFreshBeanFactory()  - 获取/创建 BeanFactory        │
+		// │ ③ prepareBeanFactory()      - 配置 BeanFactory（ClassLoader等）│
+		// │ ④ postProcessBeanFactory()  - BeanFactory 后置处理         │
+		// │ ⑤ invokeBeanFactoryPostProcessors() - 执行 BeanFactoryPostProcessor │
+		// │ ⑥ registerBeanPostProcessors() - 注册 BeanPostProcessor    │
+		// │ ⑦ initMessageSource()       - 初始化国际化消息源            │
+		// │ ⑧ initApplicationEventMulticaster() - 初始化事件广播器     │
+		// │ ⑨ onRefresh()               - 子类扩展点（Web容器特有）    │
+		// │ ⑩ registerListeners()       - 注册事件监听器               │
+		// │ ⑪ finishBeanFactoryInitialization() - 实例化所有单例 Bean │
+		// │ ⑫ finishRefresh()           - 完成刷新，发布事件           │
+		// └─────────────────────────────────────────────────────────────┘
+		//
+		// 对于子容器而言，这一步会：
+		//   - 扫描并加载 @Controller、@RestController 等 Web 层组件
+		//   - 实例化 HandlerMapping、HandlerAdapter、ViewResolver 等 MVC 组件
+		//   - 执行依赖注入（注入父容器中的 Service）
+		//   - 容器刷新完成后，会发布 ContextRefreshedEvent 事件
+		//   - 注册的 ContextRefreshListener 会捕获该事件，触发 onRefresh()
 		wac.refresh();
 	}
 
 	/**
-	 * Instantiate the WebApplicationContext for this servlet, either a default
-	 * {@link org.springframework.web.context.support.XmlWebApplicationContext}
-	 * or a {@link #setContextClass custom context class}, if set.
-	 * Delegates to #createWebApplicationContext(ApplicationContext).
-	 * @param parent the parent WebApplicationContext to use, or {@code null} if none
-	 * @return the WebApplicationContext for this servlet
+	 * 为当前 Servlet 实例化 WebApplicationContext（子容器）。
+	 *
+	 * <p>这是 Spring MVC 父子容器体系中**子容器创建的核心入口**。
+	 * 该方法会创建一个新的 WebApplicationContext 实例，并建立与父容器的父子关系。
+	 *
+	 * <p>创建的容器类型可以是：
+	 * <ul>
+	 *   <li>默认的 {@link org.springframework.web.context.support.XmlWebApplicationContext}</li>
+	 *   <li>通过 {@link #setContextClass} 设置的自定义上下文类</li>
+	 * </ul>
+	 *
+	 * <p>调用位置：在 {@link FrameworkServlet#initWebApplicationContext()} 方法中，
+	 * 当没有现成的 WebApplicationContext 可用时（即 wac == null），
+	 * 会调用此方法来创建新的子容器。
+	 *
+	 * <p>方法作用：
+	 * <ol>
+	 *   <li>创建 WebApplicationContext 实例</li>
+	 *   <li>设置父容器（建立父子关系，这是关键！）</li>
+	 *   <li>配置并刷新容器（加载 Controller、HandlerMapping 等 Web 层组件）</li>
+	 * </ol>
+	 *
+	 * @param parent 要使用的父 WebApplicationContext（即根容器），如果没有则为 {@code null}
+	 * @return 为当前 Servlet 创建的 WebApplicationContext（子容器）
 	 * @see org.springframework.web.context.support.XmlWebApplicationContext
 	 * @see #createWebApplicationContext(ApplicationContext)
 	 */
 	protected WebApplicationContext createWebApplicationContext(@Nullable WebApplicationContext parent) {
+		// 这是一个简单的委托方法，将参数类型从 WebApplicationContext 转换为 ApplicationContext
+		// 然后调用真正的创建方法
+		//
+		// 为什么需要这个转换？
+		// 因为父容器可能是任何类型的 ApplicationContext，
+		// 而不仅仅是 WebApplicationContext（虽然在实际场景中都是 WebApplicationContext）
 		return createWebApplicationContext((ApplicationContext) parent);
 	}
 

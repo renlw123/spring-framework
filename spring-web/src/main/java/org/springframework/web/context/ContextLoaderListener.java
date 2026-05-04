@@ -96,10 +96,14 @@ public class ContextLoaderListener extends ContextLoader implements ServletConte
 
 
 	/**
-	 * Initialize the root web application context.
+	 * 初始化根 WebApplicationContext（父容器）
+	 *
+	 * 这个方法由 Servlet 容器在 Web 应用启动时自动回调
+	 * 它是整个父容器初始化的"扳机"
 	 */
 	@Override
 	public void contextInitialized(ServletContextEvent event) {
+		// 🔥 关键：调用父类方法，真正开始初始化父容器
 		initWebApplicationContext(event.getServletContext());
 	}
 
