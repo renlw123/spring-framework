@@ -1178,25 +1178,24 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 	/**
-	 * Finish the refresh of this context, invoking the LifecycleProcessor's
-	 * onRefresh() method and publishing the
-	 * {@link org.springframework.context.event.ContextRefreshedEvent}.
+	 * 完成上下文的刷新操作。
+	 * 调用 LifecycleProcessor 的 onRefresh() 方法，并发布 ContextRefreshedEvent 事件。
 	 */
 	@SuppressWarnings("deprecation")
 	protected void finishRefresh() {
-		// Clear context-level resource caches (such as ASM metadata from scanning).
+		// 1. 清除上下文级别的资源缓存（如扫描产生的 ASM 元数据）
 		clearResourceCaches();
 
-		// Initialize lifecycle processor for this context.
+		// 2. 初始化生命周期处理器（管理 start/stop 生命周期组件）
 		initLifecycleProcessor();
 
-		// Propagate refresh to lifecycle processor first.
+		// 3. 触发所有生命周期组件的刷新回调（如自动启动 SmartLifecycle 组件）
 		getLifecycleProcessor().onRefresh();
 
-		// Publish the final event.
-		publishEvent(new ContextRefreshedEvent(this));
+		// 4. 发布上下文刷新完成事件（监听器可在此执行初始化后的逻辑）
+		publishEvent(new ContextRefreshedEvent(this));// 这里也是发布springmvc初始化九大组件的地方
 
-		// Participate in LiveBeansView MBean, if active.
+		// 5. 注册到 LiveBeansView MBean（JMX 监控），非原生镜像环境
 		if (!NativeDetector.inNativeImage()) {
 			LiveBeansView.registerApplicationContext(this);
 		}

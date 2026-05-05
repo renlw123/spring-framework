@@ -353,35 +353,35 @@ public class DispatcherServlet extends FrameworkServlet {
 	@Nullable
 	private MultipartResolver multipartResolver;
 
-	/** LocaleResolver used by this servlet. */
+	/** 本地化解析器 - 根据请求解析客户端语言/地区（如 Accept-Language 头、locale 参数） */
 	@Nullable
 	private LocaleResolver localeResolver;
 
-	/** ThemeResolver used by this servlet. */
+	/** 主题解析器 - 根据请求解析界面主题样式 */
 	@Nullable
 	private ThemeResolver themeResolver;
 
-	/** List of HandlerMappings used by this servlet. */
+	/** 处理器映射器列表 - 将请求 URL 映射到对应的处理器（Controller） */
 	@Nullable
 	private List<HandlerMapping> handlerMappings;
 
-	/** List of HandlerAdapters used by this servlet. */
+	/** 处理器适配器列表 - 适配不同类型的处理器（@RequestMapping、HttpRequestHandler 等） */
 	@Nullable
 	private List<HandlerAdapter> handlerAdapters;
 
-	/** List of HandlerExceptionResolvers used by this servlet. */
+	/** 异常解析器列表 - 处理 Controller 抛出的异常，返回错误视图或响应 */
 	@Nullable
 	private List<HandlerExceptionResolver> handlerExceptionResolvers;
 
-	/** RequestToViewNameTranslator used by this servlet. */
+	/** 视图名转换器 - 当 Controller 未返回视图名时，根据请求生成默认视图名 */
 	@Nullable
 	private RequestToViewNameTranslator viewNameTranslator;
 
-	/** FlashMapManager used by this servlet. */
+	/** Flash 属性管理器 - 支持重定向时跨请求传递临时属性（解决 Post/Redirect/Get 模式） */
 	@Nullable
 	private FlashMapManager flashMapManager;
 
-	/** List of ViewResolvers used by this servlet. */
+	/** 视图解析器列表 - 将逻辑视图名解析为实际视图（如 JSP、Thymeleaf 模板） */
 	@Nullable
 	private List<ViewResolver> viewResolvers;
 
@@ -528,27 +528,27 @@ public class DispatcherServlet extends FrameworkServlet {
 
 
 	/**
-	 * This implementation calls {@link #initStrategies}.
+	 * 此实现调用 {@link #initStrategies}。
 	 */
 	@Override
 	protected void onRefresh(ApplicationContext context) {
-		initStrategies(context);
+		initStrategies(context);  // 委托给策略初始化方法
 	}
 
 	/**
-	 * Initialize the strategy objects that this servlet uses.
-	 * <p>May be overridden in subclasses in order to initialize further strategy objects.
+	 * 初始化此 Servlet 使用的策略对象。
+	 * <p>子类可以重写此方法以初始化额外的策略对象。
 	 */
 	protected void initStrategies(ApplicationContext context) {
-		initMultipartResolver(context);
-		initLocaleResolver(context);
-		initThemeResolver(context);
-		initHandlerMappings(context);
-		initHandlerAdapters(context);
-		initHandlerExceptionResolvers(context);
-		initRequestToViewNameTranslator(context);
-		initViewResolvers(context);
-		initFlashMapManager(context);
+		initMultipartResolver(context);      // 1. 文件上传解析器
+		initLocaleResolver(context);         // 2. 本地化解析器
+		initThemeResolver(context);          // 3. 主题解析器
+		initHandlerMappings(context);        // 4. 处理器映射器
+		initHandlerAdapters(context);        // 5. 处理器适配器
+		initHandlerExceptionResolvers(context); // 6. 异常解析器
+		initRequestToViewNameTranslator(context); // 7. 视图名转换器
+		initViewResolvers(context);          // 8. 视图解析器
+		initFlashMapManager(context);        // 9. Flash 属性管理器
 	}
 
 	/**

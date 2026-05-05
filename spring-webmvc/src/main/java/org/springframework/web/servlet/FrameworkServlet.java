@@ -1055,27 +1055,32 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 	}
 
 	/**
-	 * Callback that receives refresh events from this servlet's WebApplicationContext.
-	 * <p>The default implementation calls {@link #onRefresh},
-	 * triggering a refresh of this servlet's context-dependent state.
-	 * @param event the incoming ApplicationContext event
+	 * 接收来自本 Servlet 的 WebApplicationContext 的刷新事件的回调方法。
+	 * <p>默认实现会调用 {@link #onRefresh}，触发此 Servlet 上下文相关状态的刷新。
+	 *
+	 * @param event 传入的 ApplicationContext 事件
 	 */
 	public void onApplicationEvent(ContextRefreshedEvent event) {
+		// 1. 标记已收到刷新事件
 		this.refreshEventReceived = true;
+
+		// 2. 同步锁，确保线程安全
 		synchronized (this.onRefreshMonitor) {
+			// 3. 调用 onRefresh，传入事件中的 ApplicationContext
 			onRefresh(event.getApplicationContext());
 		}
 	}
 
 	/**
-	 * Template method which can be overridden to add servlet-specific refresh work.
-	 * Called after successful context refresh.
-	 * <p>This implementation is empty.
-	 * @param context the current WebApplicationContext
+	 * 模板方法，可被子类重写以添加 Servlet 特定的刷新工作。
+	 * 在上下文成功刷新后被调用。
+	 * <p>此实现默认为空。
+	 *
+	 * @param context 当前的 WebApplicationContext
 	 * @see #refresh()
 	 */
 	protected void onRefresh(ApplicationContext context) {
-		// For subclasses: do nothing by default.
+		// 默认为空，留给子类实现
 	}
 
 	/**
@@ -1464,13 +1469,14 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 
 
 	/**
-	 * ApplicationListener endpoint that receives events from this servlet's WebApplicationContext
-	 * only, delegating to {@code onApplicationEvent} on the FrameworkServlet instance.
+	 * ApplicationListener 端点，仅接收来自本 Servlet 的 WebApplicationContext 的事件，
+	 * 委托给 FrameworkServlet 实例的 onApplicationEvent 方法处理。
 	 */
 	private class ContextRefreshListener implements ApplicationListener<ContextRefreshedEvent> {
 
 		@Override
 		public void onApplicationEvent(ContextRefreshedEvent event) {
+			// 委托给外部类的 onApplicationEvent 方法
 			FrameworkServlet.this.onApplicationEvent(event);
 		}
 	}
