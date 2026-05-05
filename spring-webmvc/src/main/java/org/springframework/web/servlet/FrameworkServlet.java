@@ -1093,7 +1093,15 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 
 
 	/**
-	 * Override the parent class implementation in order to intercept PATCH requests.
+	 * 重写父类的 service 方法，目的是拦截 PATCH 请求。
+	 * 在标准的 HttpServlet 中，默认的 service 方法会根据 HTTP 方法分发到 doGet、doPost 等方法，
+	 * 但默认不处理 PATCH 方法。此方法将 PATCH 请求（以及无法解析的 HTTP 方法）直接交给 processRequest 处理，
+	 * 其他方法则回退到父类的标准处理流程。
+	 *
+	 * @param request  HttpServletRequest 对象，包含客户端请求信息
+	 * @param response HttpServletResponse 对象，用于返回响应
+	 * @throws ServletException 如果请求处理过程中发生 Servlet 相关错误
+	 * @throws IOException      如果发生输入输出错误
 	 */
 	@Override
 	protected void service(HttpServletRequest request, HttpServletResponse response)
@@ -1101,17 +1109,20 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 
 		HttpMethod httpMethod = HttpMethod.resolve(request.getMethod());
 		if (httpMethod == HttpMethod.PATCH || httpMethod == null) {
+			// 处理 PATCH 请求或无法解析的 HTTP 方法（如自定义扩展方法）
 			processRequest(request, response);
-		}
-		else {
+		} else {
+			// 对于 GET、POST、PUT、DELETE 等标准方法，调用父类的 service 进行标准分发
 			super.service(request, response);
 		}
 	}
 
 	/**
-	 * Delegate GET requests to processRequest/doService.
-	 * <p>Will also be invoked by HttpServlet's default implementation of {@code doHead},
-	 * with a {@code NoBodyResponse} that just captures the content length.
+	 * 将 GET 请求委托给 processRequest/doService 处理。
+	 * <p>此方法还会被 HttpServlet 中 doHead 的默认实现调用，
+	 * 此时 response 会被包装为 NoBodyResponse，仅用于捕获内容长度（Content-Length），
+	 * 而不实际返回响应体。
+	 *
 	 * @see #doService
 	 * @see #doHead
 	 */
@@ -1123,7 +1134,8 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 	}
 
 	/**
-	 * Delegate POST requests to {@link #processRequest}.
+	 * 将 POST 请求委托给 {@link #processRequest} 处理。
+	 *
 	 * @see #doService
 	 */
 	@Override
@@ -1134,7 +1146,8 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 	}
 
 	/**
-	 * Delegate PUT requests to {@link #processRequest}.
+	 * 将 PUT 请求委托给 {@link #processRequest} 处理。
+	 *
 	 * @see #doService
 	 */
 	@Override
@@ -1145,7 +1158,8 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 	}
 
 	/**
-	 * Delegate DELETE requests to {@link #processRequest}.
+	 * 将 DELETE 请求委托给 {@link #processRequest} 处理。
+	 *
 	 * @see #doService
 	 */
 	@Override
@@ -1205,45 +1219,85 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 	}
 
 	/**
-	 * Process this request, publishing an event regardless of the outcome.
-	 * <p>The actual event handling is performed by the abstract
-	 * {@link #doService} template method.
+	 * 处理当前请求，无论处理结果如何（成功或失败），都会发布一个事件。
+	 * <p>实际的事件处理由抽象的 {@link #doService} 模板方法执行。
+	 * 此方法负责请求处理的前置准备（如上下文设置、异步管理器初始化）和
+	 * 后置清理（如重置上下文、记录日志、发布事件）。
+	 *
+	 * @param request  HttpServletRequest 对象，包含客户端请求信息
+	 * @param response HttpServletResponse 对象，用于返回响应
+	 * @throws ServletException 如果请求处理过程中发生 Servlet 相关错误
+	 * @throws IOException      如果发生输入输出错误
 	 */
 	protected final void processRequest(HttpServletRequest request, HttpServletResponse response)
 			throws ServletException, IOException {
 
+		// 记录请求处理的开始时间（毫秒），用于后续计算处理耗时
 		long startTime = System.currentTimeMillis();
+		// 记录失败原因，默认为 null；如果处理过程中发生异常，则在此保存
 		Throwable failureCause = null;
 
+		// ========== 1. 保存并设置本地化上下文 ==========
+		// 获取当前线程中已有的 LocaleContext（可能为 null）
 		LocaleContext previousLocaleContext = LocaleContextHolder.getLocaleContext();
+		// 根据当前请求构建对应的 LocaleContext（从请求中解析语言/地区信息）
 		LocaleContext localeContext = buildLocaleContext(request);
 
+		// ========== 2. 保存并设置请求属性上下文 ==========
+		// 获取当前线程中已有的 RequestAttributes（可能为 null）
 		RequestAttributes previousAttributes = RequestContextHolder.getRequestAttributes();
+		// 构建 ServletRequestAttributes 对象，封装 request、response 以及之前的 attributes
 		ServletRequestAttributes requestAttributes = buildRequestAttributes(request, response, previousAttributes);
 
+		// ========== 3. 获取并配置 WebAsyncManager 异步管理器 ==========
+		// 从请求中获取 WebAsyncManager（用于处理异步请求）
 		WebAsyncManager asyncManager = WebAsyncUtils.getAsyncManager(request);
+		// 注册一个拦截器到 Callable 上，用于在异步请求开始时绑定当前请求上下文
+		// 这样在异步线程中也能访问到正确的 RequestAttributes 和 LocaleContext
 		asyncManager.registerCallableInterceptor(FrameworkServlet.class.getName(), new RequestBindingInterceptor());
 
+		// ========== 4. 初始化上下文持有者 ==========
+		// 将新构建的 localeContext 和 requestAttributes 绑定到当前线程
+		// （通过 LocaleContextHolder 和 RequestContextHolder）
+		// 这样在请求处理过程中，Spring 组件可以通过这些 Holder 类访问当前请求的上下文信息
 		initContextHolders(request, localeContext, requestAttributes);
 
 		try {
+			// ========== 5. 执行实际的业务处理 ==========
+			// 调用抽象方法 doService，由子类实现具体的请求处理逻辑
+			// （例如 DispatcherServlet 在此处进行 MVC 分发）
 			doService(request, response);
 		}
 		catch (ServletException | IOException ex) {
+			// 捕获 ServletException 或 IOException，记录失败原因后重新抛出
 			failureCause = ex;
 			throw ex;
 		}
 		catch (Throwable ex) {
+			// 捕获其他所有异常（包括 RuntimeException、Error 等），
+			// 包装成 NestedServletException 后重新抛出
 			failureCause = ex;
 			throw new NestedServletException("Request processing failed", ex);
 		}
 
 		finally {
+			// ========== 6. 清理和善后工作（无论是否发生异常都会执行） ==========
+
+			// 6.1 恢复线程原有的 LocaleContext 和 RequestAttributes
+			// 避免对后续请求（或在同一个线程上执行的其他任务）造成上下文污染
 			resetContextHolders(request, previousLocaleContext, previousAttributes);
+
+			// 6.2 标记请求已完成
+			// 如果 requestAttributes 不为 null，则执行清理工作（如释放资源、移除异步监听器等）
 			if (requestAttributes != null) {
 				requestAttributes.requestCompleted();
 			}
+
+			// 6.3 记录请求处理结果日志（包括成功/失败、耗时、是否异步启动等信息）
 			logResult(request, response, failureCause, asyncManager);
+
+			// 6.4 发布 RequestHandledEvent 事件
+			// 该事件会被 Spring 的 ApplicationListener（如日志监听器、性能监控监听器）接收处理
 			publishRequestHandledEvent(request, response, startTime, failureCause);
 		}
 	}
@@ -1387,15 +1441,21 @@ public abstract class FrameworkServlet extends HttpServletBean implements Applic
 
 
 	/**
-	 * Subclasses must implement this method to do the work of request handling,
-	 * receiving a centralized callback for GET, POST, PUT and DELETE.
-	 * <p>The contract is essentially the same as that for the commonly overridden
-	 * {@code doGet} or {@code doPost} methods of HttpServlet.
-	 * <p>This class intercepts calls to ensure that exception handling and
-	 * event publication takes place.
-	 * @param request current HTTP request
-	 * @param response current HTTP response
-	 * @throws Exception in case of any kind of processing failure
+	 * 子类必须实现此方法来完成实际的请求处理工作，
+	 * 该方法作为 GET、POST、PUT、DELETE 等请求的统一回调入口。
+	 * <p>该方法的契约本质上与 HttpServlet 中常见的 {@code doGet} 或 {@code doPost}
+	 * 方法的重写版本相同，即接收 HTTP 请求和响应对象，并执行相应的业务逻辑。
+	 * <p>父类（FrameworkServlet）会拦截对此方法的调用，以确保异常处理机制
+	 * 和事件发布机制能够正常进行。processRequest 方法中已经完成了上下文初始化、
+	 * 异步管理、日志记录等横切关注点，而此方法专注于具体的请求处理逻辑。
+	 *
+	 * @param request  当前的 HTTP 请求对象，包含客户端发送的请求信息
+	 *                 （如请求参数、请求头、请求体等）
+	 * @param response 当前的 HTTP 响应对象，用于向客户端返回处理结果
+	 *                 （如设置状态码、响应头、响应体等）
+	 * @throws Exception 任何类型的处理失败异常（ServletException、IOException
+	 *                   或其他运行时异常），将由上层 processRequest 方法统一捕获、
+	 *                   包装并发布事件
 	 * @see javax.servlet.http.HttpServlet#doGet
 	 * @see javax.servlet.http.HttpServlet#doPost
 	 */
