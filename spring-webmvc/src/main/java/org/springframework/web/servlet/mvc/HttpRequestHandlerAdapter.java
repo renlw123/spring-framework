@@ -39,8 +39,21 @@ import org.springframework.web.servlet.ModelAndView;
  */
 public class HttpRequestHandlerAdapter implements HandlerAdapter {
 
+
+	/**
+	 * ✅ HttpRequestHandler 方式 - 不需要注解
+	 * public class MyHandler implements HttpRequestHandler {
+	 *     @Override
+	 *     public void handleRequest(HttpServletRequest request, HttpServletResponse response)
+	 *             throws IOException {
+	 *         response.getWriter().write("Hello");
+	 *     }
+	 * }
+
+	 */
 	@Override
 	public boolean supports(Object handler) {
+		// 只要处理器是 HttpRequestHandler 的实例，就返回 true
 		return (handler instanceof HttpRequestHandler);
 	}
 

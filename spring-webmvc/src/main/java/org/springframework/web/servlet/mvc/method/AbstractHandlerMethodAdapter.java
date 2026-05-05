@@ -60,12 +60,22 @@ public abstract class AbstractHandlerMethodAdapter extends WebContentGenerator i
 
 
 	/**
-	 * This implementation expects the handler to be an {@link HandlerMethod}.
-	 * @param handler the handler instance to check
-	 * @return whether this adapter can adapt the given handler
+	 *
+	 * @Controller
+	 * @RequestMapping("/api/users") // 类级别路径
+	 * public class UserController {
+	 *
+	 *     do someSing
+	 * }
+	 *
+	 * 这个实现要求处理器必须是 HandlerMethod 类型
+	 * @param handler 要检查的处理器实例
+	 * @return 该适配器是否能适配给定的处理器
 	 */
 	@Override
 	public final boolean supports(Object handler) {
+		// 1. 首先必须是 HandlerMethod 类型（即 @RequestMapping 注解的方法）
+		// 2. 然后调用 supportsInternal 进行额外的内部校验
 		return (handler instanceof HandlerMethod && supportsInternal((HandlerMethod) handler));
 	}
 

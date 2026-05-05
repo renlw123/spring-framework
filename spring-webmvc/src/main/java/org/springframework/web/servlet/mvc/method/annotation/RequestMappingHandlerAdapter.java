@@ -771,16 +771,21 @@ public class RequestMappingHandlerAdapter extends AbstractHandlerMethodAdapter
 
 
 	/**
-	 * Always return {@code true} since any method argument and return value
-	 * type will be processed in some way. A method argument not recognized
-	 * by any HandlerMethodArgumentResolver is interpreted as a request parameter
-	 * if it is a simple type, or as a model attribute otherwise. A return value
-	 * not recognized by any HandlerMethodReturnValueHandler will be interpreted
-	 * as a model attribute.
+	 * 始终返回 {@code true}，因为任何方法参数和返回值类型都会以某种方式被处理。
+	 *
+	 * 如果一个方法参数没有被任何 HandlerMethodArgumentResolver 识别：
+	 *   - 如果它是简单类型，会被解释为请求参数
+	 *   - 否则会被解释为模型属性
+	 *
+	 * 如果一个返回值没有被任何 HandlerMethodReturnValueHandler 识别：
+	 *   会被解释为模型属性
+	 *
+	 * @param handlerMethod 要检查的处理器方法
+	 * @return 始终返回 true
 	 */
 	@Override
 	protected boolean supportsInternal(HandlerMethod handlerMethod) {
-		return true;
+		return true;  // 无条件支持所有 HandlerMethod
 	}
 
 	@Override

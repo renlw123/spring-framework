@@ -38,8 +38,36 @@ import org.springframework.web.servlet.ModelAndView;
  */
 public class SimpleControllerHandlerAdapter implements HandlerAdapter {
 
+	/**
+	 * public class MyTraditionalController implements Controller {
+	 *
+	 *     @Override
+	 *     public ModelAndView handleRequest(HttpServletRequest request,
+	 *                                       HttpServletResponse response) throws Exception {
+	 *
+	 *         // 1. 获取请求参数
+	 *         String name = request.getParameter("name");
+	 *
+	 *         // 2. 处理业务逻辑
+	 *         String message = "Hello, " + (name != null ? name : "Guest");
+	 *
+	 *         // 3. 创建 ModelAndView 对象
+	 *         ModelAndView mav = new ModelAndView();
+	 *
+	 *         // 4. 添加数据到模型
+	 *         mav.addObject("message", message);
+	 *         mav.addObject("timestamp", System.currentTimeMillis());
+	 *
+	 *         // 5. 设置视图名称（JSP 路径）
+	 *         mav.setViewName("hello");  // 会解析为 /WEB-INF/views/hello.jsp
+	 *
+	 *         return mav;
+	 *     }
+	 * }
+	 */
 	@Override
 	public boolean supports(Object handler) {
+		// 只要处理器是 Controller 接口的实例，就返回 true
 		return (handler instanceof Controller);
 	}
 

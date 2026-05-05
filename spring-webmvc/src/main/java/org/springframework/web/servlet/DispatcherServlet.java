@@ -677,36 +677,40 @@ public class DispatcherServlet extends FrameworkServlet {
 	}
 
 	/**
-	 * Initialize the HandlerAdapters used by this class.
-	 * <p>If no HandlerAdapter beans are defined in the BeanFactory for this namespace,
-	 * we default to SimpleControllerHandlerAdapter.
+	 * 初始化此类使用的 HandlerAdapters。
+	 * <p>如果在当前命名空间的 BeanFactory 中没有定义任何 HandlerAdapter Bean，
+	 * 则默认使用 SimpleControllerHandlerAdapter。
 	 */
 	private void initHandlerAdapters(ApplicationContext context) {
 		this.handlerAdapters = null;
 
+		// ========== 1. 模式一：检测所有 HandlerAdapter ==========
 		if (this.detectAllHandlerAdapters) {
-			// Find all HandlerAdapters in the ApplicationContext, including ancestor contexts.
+			// 从当前容器及父容器中查找所有 HandlerAdapter 类型的 Bean
 			Map<String, HandlerAdapter> matchingBeans =
 					BeanFactoryUtils.beansOfTypeIncludingAncestors(context, HandlerAdapter.class, true, false);
 			if (!matchingBeans.isEmpty()) {
 				this.handlerAdapters = new ArrayList<>(matchingBeans.values());
-				// We keep HandlerAdapters in sorted order.
+				// 按 @Order 注解或 Ordered 接口排序
 				AnnotationAwareOrderComparator.sort(this.handlerAdapters);
 			}
 		}
+		// ========== 2. 模式二：只获取默认名称的 HandlerAdapter ==========
 		else {
 			try {
+				// 只获取 Bean 名为 "handlerAdapter" 的 HandlerAdapter
 				HandlerAdapter ha = context.getBean(HANDLER_ADAPTER_BEAN_NAME, HandlerAdapter.class);
 				this.handlerAdapters = Collections.singletonList(ha);
 			}
 			catch (NoSuchBeanDefinitionException ex) {
-				// Ignore, we'll add a default HandlerAdapter later.
+				// 忽略，后续会添加默认的 HandlerAdapter
 			}
 		}
 
-		// Ensure we have at least some HandlerAdapters, by registering
-		// default HandlerAdapters if no other adapters are found.
+		// ========== 3. 兜底策略：使用默认配置 ==========
+		// 确保至少有一个 HandlerAdapter
 		if (this.handlerAdapters == null) {
+			// 从 DispatcherServlet.properties 读取默认策略
 			this.handlerAdapters = getDefaultStrategies(context, HandlerAdapter.class);
 			if (logger.isTraceEnabled()) {
 				logger.trace("No HandlerAdapters declared for servlet '" + getServletName() +
@@ -1451,18 +1455,35 @@ public class DispatcherServlet extends FrameworkServlet {
 	}
 
 	/**
-	 * Return the HandlerAdapter for this handler object.
-	 * @param handler the handler object to find an adapter for
-	 * @throws ServletException if no HandlerAdapter can be found for the handler. This is a fatal error.
+	 * 获取能处理该处理器对象的处理器适配器
+	 *
+	 * 这是适配器设计模式在Spring MVC中的典型应用。不同类型的处理器（如@RequestMapping方法、
+	 * HttpRequestHandler、传统Controller等）需要不同的执行方式，适配器负责统一它们的调用接口。
+	 *
+	 * @param handler 处理器对象（通常是从HandlerMapping中获取的）
+	 * @return 能支持该处理器的适配器
+	 * @throws ServletException 如果没有找到合适的适配器（这是致命错误，会导致请求失败）
 	 */
 	protected HandlerAdapter getHandlerAdapter(Object handler) throws ServletException {
+		// 检查适配器列表是否已初始化（在容器启动时，DispatcherServlet会初始化所有HandlerAdapter）
 		if (this.handlerAdapters != null) {
+			// 遍历所有已注册的适配器（例如：RequestMappingHandlerAdapter、HttpRequestHandlerAdapter等）
 			for (HandlerAdapter adapter : this.handlerAdapters) {
+				// 询问当前适配器是否支持该处理器类型
+				// 每个适配器的supports实现不同，例如：
+				// - RequestMappingHandlerAdapter: 只支持HandlerMethod类型
+				// - HttpRequestHandlerAdapter: 只支持HttpRequestHandler类型
+				// - SimpleControllerHandlerAdapter: 只支持Controller接口实现类
 				if (adapter.supports(handler)) {
+					// 找到第一个支持的适配器就直接返回
+					// 注意：这里返回的是找到的第一个，所以适配器的顺序很重要
 					return adapter;
 				}
 			}
 		}
+
+		// 遍历完所有适配器都没找到能支持的，说明当前处理器类型没有对应的适配器
+		// 这通常表示DispatcherServlet的配置有问题，缺少必要的HandlerAdapter
 		throw new ServletException("No adapter for handler [" + handler +
 				"]: The DispatcherServlet configuration needs to include a HandlerAdapter that supports this handler");
 	}
