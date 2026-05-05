@@ -43,16 +43,19 @@ public class SourceFilteringListener implements GenericApplicationListener {
 
 
 	/**
-	 * Create a SourceFilteringListener for the given event source.
-	 * @param source the event source that this listener filters for,
-	 * only processing events from this source
-	 * @param delegate the delegate listener to invoke with event
-	 * from the specified source
+	 * 为指定的事件源创建 SourceFilteringListener。
+	 *
+	 * @param source   事件源，此监听器只处理来自该事件源的事件
+	 * @param delegate 委托监听器，当接收到来自指定源的事件时，会调用此监听器
 	 */
 	public SourceFilteringListener(Object source, ApplicationListener<?> delegate) {
+		// 1. 保存要过滤的事件源
 		this.source = source;
+
+		// 2. 将委托监听器适配为 GenericApplicationListener 类型
 		this.delegate = (delegate instanceof GenericApplicationListener ?
-				(GenericApplicationListener) delegate : new GenericApplicationListenerAdapter(delegate));
+				(GenericApplicationListener) delegate :           // 已是泛型监听器，直接使用
+				new GenericApplicationListenerAdapter(delegate)); // 包装为适配器
 	}
 
 	/**
