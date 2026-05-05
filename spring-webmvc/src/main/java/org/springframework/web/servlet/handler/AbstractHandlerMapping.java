@@ -371,14 +371,29 @@ public abstract class AbstractHandlerMapping extends WebApplicationObjectSupport
 
 
 	/**
-	 * Initializes the interceptors.
-	 * @see #extendInterceptors(java.util.List)
-	 * @see #initInterceptors()
+	 * 初始化拦截器。
+	 * <p>此方法在 Spring 容器注入 ApplicationContext 时被调用（通过 ApplicationContextAware 机制）。
+	 * 执行顺序早于 afterPropertiesSet()。
+	 *
+	 * @see #extendInterceptors(java.util.List)    - 扩展拦截器（供子类重写添加自定义拦截器）
+	 * @see #initInterceptors()                    - 初始化拦截器（将配置的拦截器适配并排序）
 	 */
 	@Override
 	protected void initApplicationContext() throws BeansException {
+		// ========== 1. 扩展拦截器 ==========
+		// 钩子方法，供子类重写以添加额外的拦截器
+		// 子类可以在此方法中向 interceptors 列表添加自定义拦截器
 		extendInterceptors(this.interceptors);
+
+		// ========== 2. 检测并添加 MappedInterceptor ==========
+		// 从 Spring 容器中查找所有 MappedInterceptor 类型的 Bean
+		// 这些拦截器通常通过 @Component 或 XML 配置声明，带有路径匹配规则
+		// 将它们添加到 adaptedInterceptors 列表中
 		detectMappedInterceptors(this.adaptedInterceptors);
+
+		// ========== 3. 初始化拦截器 ==========
+		// 将 interceptors 中的拦截器进行适配、排序，并合并到 adaptedInterceptors
+		// 最终 adaptedInterceptors 包含了所有需要执行的拦截器
 		initInterceptors();
 	}
 
@@ -585,37 +600,39 @@ public abstract class AbstractHandlerMapping extends WebApplicationObjectSupport
 	}
 
 	/**
-	 * Build a {@link HandlerExecutionChain} for the given handler, including
-	 * applicable interceptors.
-	 * <p>The default implementation builds a standard {@link HandlerExecutionChain}
-	 * with the given handler, the common interceptors of the handler mapping, and any
-	 * {@link MappedInterceptor MappedInterceptors} matching to the current request URL. Interceptors
-	 * are added in the order they were registered. Subclasses may override this
-	 * in order to extend/rearrange the list of interceptors.
-	 * <p><b>NOTE:</b> The passed-in handler object may be a raw handler or a
-	 * pre-built {@link HandlerExecutionChain}. This method should handle those
-	 * two cases explicitly, either building a new {@link HandlerExecutionChain}
-	 * or extending the existing chain.
-	 * <p>For simply adding an interceptor in a custom subclass, consider calling
-	 * {@code super.getHandlerExecutionChain(handler, request)} and invoking
-	 * {@link HandlerExecutionChain#addInterceptor} on the returned chain object.
-	 * @param handler the resolved handler instance (never {@code null})
-	 * @param request current HTTP request
-	 * @return the HandlerExecutionChain (never {@code null})
-	 * @see #getAdaptedInterceptors()
+	 * 为给定的处理器构建 HandlerExecutionChain，包含适用的拦截器。
+	 * <p>默认实现会构建一个标准的 HandlerExecutionChain，包含：
+	 * - 给定的处理器
+	 * - 处理器映射器的通用拦截器
+	 * - 与当前请求 URL 匹配的 MappedInterceptor
+	 * <p>拦截器按照注册的顺序添加。子类可以重写此方法来扩展/重新排序拦截器列表。
+	 * <p><b>注意：</b>传入的处理器对象可能是原始处理器或预先构建的 HandlerExecutionChain。
+	 * 此方法应显式处理这两种情况，要么构建新的 HandlerExecutionChain，要么扩展已有的链。
+	 *
+	 * @param handler 解析后的处理器实例（永远不为 null）
+	 * @param request 当前 HTTP 请求
+	 * @return HandlerExecutionChain（永远不为 null）
 	 */
 	protected HandlerExecutionChain getHandlerExecutionChain(Object handler, HttpServletRequest request) {
+		// ========== 1. 创建或获取 HandlerExecutionChain ==========
+		// 如果 handler 已经是 HandlerExecutionChain，则直接使用；否则创建新的
 		HandlerExecutionChain chain = (handler instanceof HandlerExecutionChain ?
 				(HandlerExecutionChain) handler : new HandlerExecutionChain(handler));
 
+		// ========== 2. 遍历所有适配过的拦截器 ==========
 		for (HandlerInterceptor interceptor : this.adaptedInterceptors) {
 			if (interceptor instanceof MappedInterceptor) {
+				// ========== 3. 处理带路径映射的拦截器 ==========
 				MappedInterceptor mappedInterceptor = (MappedInterceptor) interceptor;
+				// 检查拦截器是否匹配当前请求的路径
 				if (mappedInterceptor.matches(request)) {
+					// 只添加匹配的拦截器
 					chain.addInterceptor(mappedInterceptor.getInterceptor());
 				}
 			}
 			else {
+				// ========== 4. 处理普通拦截器 ==========
+				// 普通拦截器对每个请求都生效
 				chain.addInterceptor(interceptor);
 			}
 		}
