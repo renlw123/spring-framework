@@ -626,36 +626,40 @@ public class DispatcherServlet extends FrameworkServlet {
 	}
 
 	/**
-	 * Initialize the HandlerMappings used by this class.
-	 * <p>If no HandlerMapping beans are defined in the BeanFactory for this namespace,
-	 * we default to BeanNameUrlHandlerMapping.
+	 * 初始化此类使用的 HandlerMappings。
+	 * <p>如果在当前命名空间的 BeanFactory 中没有定义任何 HandlerMapping Bean，
+	 * 则默认使用 BeanNameUrlHandlerMapping。
 	 */
 	private void initHandlerMappings(ApplicationContext context) {
 		this.handlerMappings = null;
 
+		// ========== 1. 模式一：检测所有 HandlerMapping ==========
 		if (this.detectAllHandlerMappings) {
-			// Find all HandlerMappings in the ApplicationContext, including ancestor contexts.
+			// 从当前容器及父容器中查找所有 HandlerMapping 类型的 Bean
 			Map<String, HandlerMapping> matchingBeans =
 					BeanFactoryUtils.beansOfTypeIncludingAncestors(context, HandlerMapping.class, true, false);
 			if (!matchingBeans.isEmpty()) {
 				this.handlerMappings = new ArrayList<>(matchingBeans.values());
-				// We keep HandlerMappings in sorted order.
+				// 按 @Order 注解或 Ordered 接口排序
 				AnnotationAwareOrderComparator.sort(this.handlerMappings);
 			}
 		}
+		// ========== 2. 模式二：只获取默认名称的 HandlerMapping ==========
 		else {
 			try {
+				// 只获取 Bean 名为 "handlerMapping" 的 HandlerMapping,从ioc中获取或创建handlerMapping并且执行后置处理器初始化handlerMapping
 				HandlerMapping hm = context.getBean(HANDLER_MAPPING_BEAN_NAME, HandlerMapping.class);
 				this.handlerMappings = Collections.singletonList(hm);
 			}
 			catch (NoSuchBeanDefinitionException ex) {
-				// Ignore, we'll add a default HandlerMapping later.
+				// 忽略，后续会添加默认的 HandlerMapping
 			}
 		}
 
-		// Ensure we have at least one HandlerMapping, by registering
-		// a default HandlerMapping if no other mappings are found.
+		// ========== 3. 兜底策略：使用默认配置 ==========
+		// 确保至少有一个 HandlerMapping
 		if (this.handlerMappings == null) {
+			// 从 DispatcherServlet.properties 读取默认策略
 			this.handlerMappings = getDefaultStrategies(context, HandlerMapping.class);
 			if (logger.isTraceEnabled()) {
 				logger.trace("No HandlerMappings declared for servlet '" + getServletName() +
@@ -663,9 +667,10 @@ public class DispatcherServlet extends FrameworkServlet {
 			}
 		}
 
+		// ========== 4. 检测是否使用 PathPattern 模式 ==========
 		for (HandlerMapping mapping : this.handlerMappings) {
 			if (mapping.usesPathPatterns()) {
-				this.parseRequestPath = true;
+				this.parseRequestPath = true;  // 启用请求路径预解析
 				break;
 			}
 		}
@@ -895,21 +900,20 @@ public class DispatcherServlet extends FrameworkServlet {
 	}
 
 	/**
-	 * Create a List of default strategy objects for the given strategy interface.
-	 * <p>The default implementation uses the "DispatcherServlet.properties" file (in the same
-	 * package as the DispatcherServlet class) to determine the class names. It instantiates
-	 * the strategy objects through the context's BeanFactory.
-	 * @param context the current WebApplicationContext
-	 * @param strategyInterface the strategy interface
-	 * @return the List of corresponding strategy objects
+	 * 为给定的策略接口创建默认策略对象列表。
+	 * <p>默认实现使用 "DispatcherServlet.properties" 文件（与 DispatcherServlet 类在同一包中）
+	 * 来确定类名。它通过上下文的 BeanFactory 实例化策略对象。
+	 *
+	 * @param context           当前 WebApplicationContext
+	 * @param strategyInterface 策略接口（如 HandlerMapping.class）
+	 * @return 对应的策略对象列表
 	 */
 	@SuppressWarnings("unchecked")
 	protected <T> List<T> getDefaultStrategies(ApplicationContext context, Class<T> strategyInterface) {
+		// ========== 1. 懒加载加载配置文件 ==========
 		if (defaultStrategies == null) {
 			try {
-				// Load default strategy implementations from properties file.
-				// This is currently strictly internal and not meant to be customized
-				// by application developers.
+				// 加载 DispatcherServlet.properties 文件
 				ClassPathResource resource = new ClassPathResource(DEFAULT_STRATEGIES_PATH, DispatcherServlet.class);
 				defaultStrategies = PropertiesLoaderUtils.loadProperties(resource);
 			}
@@ -918,13 +922,18 @@ public class DispatcherServlet extends FrameworkServlet {
 			}
 		}
 
-		String key = strategyInterface.getName();
-		String value = defaultStrategies.getProperty(key);
+		// ========== 2. 获取接口对应的默认实现类名 ==========
+		String key = strategyInterface.getName();  // 如 "org.springframework.web.servlet.HandlerMapping"
+		String value = defaultStrategies.getProperty(key);  // 如 "org.springframework.web.servlet.handler.BeanNameUrlHandlerMapping,org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping"
+
 		if (value != null) {
+			// ========== 3. 解析类名列表（逗号分隔） ==========
 			String[] classNames = StringUtils.commaDelimitedListToStringArray(value);
 			List<T> strategies = new ArrayList<>(classNames.length);
+
 			for (String className : classNames) {
 				try {
+					// ========== 4. 加载类并实例化 ==========
 					Class<?> clazz = ClassUtils.forName(className, DispatcherServlet.class.getClassLoader());
 					Object strategy = createDefaultStrategy(context, clazz);
 					strategies.add((T) strategy);
@@ -932,12 +941,12 @@ public class DispatcherServlet extends FrameworkServlet {
 				catch (ClassNotFoundException ex) {
 					throw new BeanInitializationException(
 							"Could not find DispatcherServlet's default strategy class [" + className +
-							"] for interface [" + key + "]", ex);
+									"] for interface [" + key + "]", ex);
 				}
 				catch (LinkageError err) {
 					throw new BeanInitializationException(
 							"Unresolvable class definition for DispatcherServlet's default strategy class [" +
-							className + "] for interface [" + key + "]", err);
+									className + "] for interface [" + key + "]", err);
 				}
 			}
 			return strategies;
@@ -1398,21 +1407,27 @@ public class DispatcherServlet extends FrameworkServlet {
 	}
 
 	/**
-	 * Return the HandlerExecutionChain for this request.
-	 * <p>Tries all handler mappings in order.
-	 * @param request current HTTP request
-	 * @return the HandlerExecutionChain, or {@code null} if no handler could be found
+	 * 返回当前请求的 HandlerExecutionChain。
+	 * <p>按顺序尝试所有处理器映射器。
+	 *
+	 * @param request 当前 HTTP 请求
+	 * @return HandlerExecutionChain，如果找不到处理器则返回 {@code null}
 	 */
 	@Nullable
 	protected HandlerExecutionChain getHandler(HttpServletRequest request) throws Exception {
+		// 1. 检查是否存在处理器映射器列表
 		if (this.handlerMappings != null) {
+			// 2. 遍历所有已注册的 HandlerMapping
 			for (HandlerMapping mapping : this.handlerMappings) {
+				// 3. 尝试获取处理器执行链
 				HandlerExecutionChain handler = mapping.getHandler(request);
 				if (handler != null) {
+					// 4. 找到第一个能处理的就立即返回
 					return handler;
 				}
 			}
 		}
+		// 5. 没有找到任何处理器
 		return null;
 	}
 

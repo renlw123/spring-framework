@@ -486,36 +486,33 @@ public abstract class AbstractHandlerMapping extends WebApplicationObjectSupport
 		return getPatternParser() != null;
 	}
 
-	/**
-	 * Look up a handler for the given request, falling back to the default
-	 * handler if no specific one is found.
-	 * @param request current HTTP request
-	 * @return the corresponding handler instance, or the default handler
-	 * @see #getHandlerInternal
-	 */
 	@Override
 	@Nullable
 	public final HandlerExecutionChain getHandler(HttpServletRequest request) throws Exception {
-		Object handler = getHandlerInternal(request);
+		// ========== 1. 获取处理器 ==========
+		Object handler = getHandlerInternal(request);     // 抽象方法，子类实现
 		if (handler == null) {
-			handler = getDefaultHandler();
+			handler = getDefaultHandler();                 // 使用默认处理器
 		}
 		if (handler == null) {
-			return null;
-		}
-		// Bean name or resolved handler?
-		if (handler instanceof String) {
-			String handlerName = (String) handler;
-			handler = obtainApplicationContext().getBean(handlerName);
+			return null;                                   // 没有找到处理器
 		}
 
-		// Ensure presence of cached lookupPath for interceptors and others
+		// ========== 2. 处理处理器名称为字符串的情况 ==========
+		if (handler instanceof String) {
+			String handlerName = (String) handler;
+			handler = obtainApplicationContext().getBean(handlerName);  // 从容器中获取实际 Bean
+		}
+
+		// ========== 3. 确保缓存请求路径（供拦截器等使用） ==========
 		if (!ServletRequestPathUtils.hasCachedPath(request)) {
 			initLookupPath(request);
 		}
 
+		// ========== 4. 构建 HandlerExecutionChain（添加拦截器） ==========
 		HandlerExecutionChain executionChain = getHandlerExecutionChain(handler, request);
 
+		// ========== 5. 日志记录 ==========
 		if (logger.isTraceEnabled()) {
 			logger.trace("Mapped to " + handler);
 		}
@@ -523,6 +520,7 @@ public abstract class AbstractHandlerMapping extends WebApplicationObjectSupport
 			logger.debug("Mapped to " + executionChain.getHandler());
 		}
 
+		// ========== 6. 处理 CORS（跨域资源共享） ==========
 		if (hasCorsConfigurationSource(handler) || CorsUtils.isPreFlightRequest(request)) {
 			CorsConfiguration config = getCorsConfiguration(handler, request);
 			if (getCorsConfigurationSource() != null) {
@@ -540,44 +538,48 @@ public abstract class AbstractHandlerMapping extends WebApplicationObjectSupport
 	}
 
 	/**
-	 * Look up a handler for the given request, returning {@code null} if no
-	 * specific one is found. This method is called by {@link #getHandler};
-	 * a {@code null} return value will lead to the default handler, if one is set.
-	 * <p>On CORS pre-flight requests this method should return a match not for
-	 * the pre-flight request but for the expected actual request based on the URL
-	 * path, the HTTP methods from the "Access-Control-Request-Method" header, and
-	 * the headers from the "Access-Control-Request-Headers" header thus allowing
-	 * the CORS configuration to be obtained via {@link #getCorsConfiguration(Object, HttpServletRequest)},
-	 * <p>Note: This method may also return a pre-built {@link HandlerExecutionChain},
-	 * combining a handler object with dynamically determined interceptors.
-	 * Statically specified interceptors will get merged into such an existing chain.
-	 * @param request current HTTP request
-	 * @return the corresponding handler instance, or {@code null} if none found
-	 * @throws Exception if there is an internal error
+	 * 为给定请求查找处理器，如果没有找到特定的处理器则返回 {@code null}。
+	 * 此方法由 {@link #getHandler} 调用；返回 {@code null} 将会导致使用默认处理器（如果设置了的话）。
+	 * <p>对于 CORS 预检请求，此方法不应为预检请求本身返回匹配，而应基于 URL 路径、
+	 * "Access-Control-Request-Method" 头中的 HTTP 方法以及 "Access-Control-Request-Headers"
+	 * 头中的头信息为预期的实际请求返回匹配，从而允许通过
+	 * {@link #getCorsConfiguration(Object, HttpServletRequest)} 获取 CORS 配置。
+	 * <p>注意：此方法也可以返回预先构建的 {@link HandlerExecutionChain}，
+	 * 将处理器对象与动态确定的拦截器组合在一起。
+	 * 静态指定的拦截器将被合并到这样的现有链中。
+	 *
+	 * @param request 当前 HTTP 请求
+	 * @return 对应的处理器实例，如果没有找到则返回 {@code null}
+	 * @throws Exception 如果发生内部错误
 	 */
 	@Nullable
 	protected abstract Object getHandlerInternal(HttpServletRequest request) throws Exception;
 
 	/**
-	 * Initialize the path to use for request mapping.
-	 * <p>When parsed patterns are {@link #usesPathPatterns() enabled} a parsed
-	 * {@code RequestPath} is expected to have been
-	 * {@link ServletRequestPathUtils#parseAndCache(HttpServletRequest) parsed}
-	 * externally by the {@link org.springframework.web.servlet.DispatcherServlet}
-	 * or {@link org.springframework.web.filter.ServletRequestPathFilter}.
-	 * <p>Otherwise for String pattern matching via {@code PathMatcher} the
-	 * path is {@link UrlPathHelper#resolveAndCacheLookupPath resolved} by this
-	 * method.
+	 * 初始化用于请求映射的路径。
+	 * <p>当启用解析路径模式时，期望已由 DispatcherServlet 或 ServletRequestPathFilter
+	 * 在外部解析并缓存了 RequestPath。
+	 * <p>否则，使用 PathMatcher 进行字符串模式匹配，路径由此方法解析。
+	 *
 	 * @since 5.3
 	 */
 	protected String initLookupPath(HttpServletRequest request) {
 		if (usesPathPatterns()) {
+			// ========== 模式一：使用解析后的路径模式（Spring 5.3+，性能更好） ==========
+			// 移除旧属性，避免干扰
 			request.removeAttribute(UrlPathHelper.PATH_ATTRIBUTE);
+
+			// 获取已解析并缓存的 RequestPath
 			RequestPath requestPath = ServletRequestPathUtils.getParsedRequestPath(request);
+
+			// 获取应用内的路径部分（如 "/user/123"）
 			String lookupPath = requestPath.pathWithinApplication().value();
+
+			// 去除分号内容（如 "/user;123" → "/user"）
 			return UrlPathHelper.defaultInstance.removeSemicolonContent(lookupPath);
 		}
 		else {
+			// ========== 模式二：使用传统的 PathMatcher 字符串匹配（Spring 5.3 之前） ==========
 			return getUrlPathHelper().resolveAndCacheLookupPath(request);
 		}
 	}

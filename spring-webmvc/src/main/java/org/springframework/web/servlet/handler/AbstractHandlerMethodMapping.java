@@ -205,26 +205,26 @@ public abstract class AbstractHandlerMethodMapping<T> extends AbstractHandlerMap
 	// Handler method detection
 
 	/**
-	 * Detects handler methods at initialization.
-	 * @see #initHandlerMethods
+	 * 在初始化时检测处理器方法。
 	 */
 	@Override
 	public void afterPropertiesSet() {
-		initHandlerMethods();
+		initHandlerMethods();  // 实现 InitializingBean 接口，容器启动时自动调用
 	}
 
 	/**
-	 * Scan beans in the ApplicationContext, detect and register handler methods.
-	 * @see #getCandidateBeanNames()
-	 * @see #processCandidateBean
-	 * @see #handlerMethodsInitialized
+	 * 扫描 ApplicationContext 中的 Bean，检测并注册处理器方法。
 	 */
 	protected void initHandlerMethods() {
+		// 1. 获取所有候选 Bean 名称
 		for (String beanName : getCandidateBeanNames()) {
+			// 2. 跳过 Scoped 代理目标 Bean（如 session、request 作用域的代理）
 			if (!beanName.startsWith(SCOPED_TARGET_NAME_PREFIX)) {
+				// 3. 处理候选 Bean，检测其中的 @RequestMapping 方法
 				processCandidateBean(beanName);
 			}
 		}
+		// 4. 注册完成后回调
 		handlerMethodsInitialized(getHandlerMethods());
 	}
 
@@ -241,46 +241,53 @@ public abstract class AbstractHandlerMethodMapping<T> extends AbstractHandlerMap
 	}
 
 	/**
-	 * Determine the type of the specified candidate bean and call
-	 * {@link #detectHandlerMethods} if identified as a handler type.
-	 * <p>This implementation avoids bean creation through checking
-	 * {@link org.springframework.beans.factory.BeanFactory#getType}
-	 * and calling {@link #detectHandlerMethods} with the bean name.
-	 * @param beanName the name of the candidate bean
+	 * 确定指定候选 Bean 的类型，如果被识别为处理器类型，则调用 {@link #detectHandlerMethods}。
+	 * <p>此实现通过检查 {@link BeanFactory#getType} 避免创建 Bean，
+	 * 并使用 Bean 名称调用 {@link #detectHandlerMethods}。
+	 *
+	 * @param beanName 候选 Bean 的名称
 	 * @since 5.1
-	 * @see #isHandler
-	 * @see #detectHandlerMethods
 	 */
 	protected void processCandidateBean(String beanName) {
+		// ========== 1. 获取 Bean 类型（不实例化 Bean） ==========
 		Class<?> beanType = null;
 		try {
+			// 通过 BeanFactory 获取类型，不会触发 Bean 实例化
 			beanType = obtainApplicationContext().getType(beanName);
 		}
 		catch (Throwable ex) {
-			// An unresolvable bean type, probably from a lazy bean - let's ignore it.
+			// 懒加载 Bean 可能无法解析类型，忽略即可
 			if (logger.isTraceEnabled()) {
 				logger.trace("Could not resolve type for bean '" + beanName + "'", ex);
 			}
 		}
+
+		// ========== 2. 判断是否为处理器类型 ==========
 		if (beanType != null && isHandler(beanType)) {
+			// ========== 3. 检测并注册处理器方法 ==========
 			detectHandlerMethods(beanName);
 		}
 	}
 
 	/**
-	 * Look for handler methods in the specified handler bean.
-	 * @param handler either a bean name or an actual handler instance
-	 * @see #getMappingForMethod
+	 * 在指定的处理器 Bean 中查找处理器方法。
+	 *
+	 * @param handler 可以是 Bean 名称或实际的处理器实例
 	 */
 	protected void detectHandlerMethods(Object handler) {
+		// ========== 1. 获取处理器类型 ==========
 		Class<?> handlerType = (handler instanceof String ?
 				obtainApplicationContext().getType((String) handler) : handler.getClass());
 
 		if (handlerType != null) {
+			// 获取用户原始类（去除 CGLIB 代理）
 			Class<?> userType = ClassUtils.getUserClass(handlerType);
+
+			// ========== 2. 查找所有带 @RequestMapping 的方法 ==========
 			Map<Method, T> methods = MethodIntrospector.selectMethods(userType,
 					(MethodIntrospector.MetadataLookup<T>) method -> {
 						try {
+							// 获取方法上的映射信息
 							return getMappingForMethod(method, userType);
 						}
 						catch (Throwable ex) {
@@ -288,13 +295,18 @@ public abstract class AbstractHandlerMethodMapping<T> extends AbstractHandlerMap
 									userType.getName() + "]: " + method, ex);
 						}
 					});
+
+			// ========== 3. 日志记录 ==========
 			if (logger.isTraceEnabled()) {
 				logger.trace(formatMappings(userType, methods));
 			}
 			else if (mappingsLogger.isDebugEnabled()) {
 				mappingsLogger.debug(formatMappings(userType, methods));
 			}
+
+			// ========== 4. 注册每个处理器方法 ==========
 			methods.forEach((method, mapping) -> {
+				// 选择可调用的方法（处理 AOP 代理情况）
 				Method invocableMethod = AopUtils.selectInvocableMethod(method, userType);
 				registerHandlerMethod(handler, invocableMethod, mapping);
 			});
@@ -320,15 +332,15 @@ public abstract class AbstractHandlerMethodMapping<T> extends AbstractHandlerMap
 	}
 
 	/**
-	 * Register a handler method and its unique mapping. Invoked at startup for
-	 * each detected handler method.
-	 * @param handler the bean name of the handler or the handler instance
-	 * @param method the method to register
-	 * @param mapping the mapping conditions associated with the handler method
-	 * @throws IllegalStateException if another method was already registered
-	 * under the same mapping
+	 * 注册处理器方法及其唯一的映射。在启动时为每个检测到的处理器方法调用。
+	 *
+	 * @param handler 处理器的 Bean 名称或处理器实例
+	 * @param method  要注册的方法
+	 * @param mapping 与处理器方法关联的映射条件
+	 * @throws IllegalStateException 如果另一个方法已经在同一个映射下注册
 	 */
 	protected void registerHandlerMethod(Object handler, Method method, T mapping) {
+		// 委托给 MappingRegistry 完成实际注册
 		this.mappingRegistry.register(mapping, handler, method);
 	}
 
@@ -372,50 +384,59 @@ public abstract class AbstractHandlerMethodMapping<T> extends AbstractHandlerMap
 	// Handler method lookup
 
 	/**
-	 * Look up a handler method for the given request.
+	 * 为给定请求查找处理器方法。
 	 */
 	@Override
 	@Nullable
 	protected HandlerMethod getHandlerInternal(HttpServletRequest request) throws Exception {
+		// 1. 获取请求路径（如 "/user/123"）
 		String lookupPath = initLookupPath(request);
+
+		// 2. 获取读锁（保证线程安全，允许多个读操作并发）
 		this.mappingRegistry.acquireReadLock();
 		try {
+			// 3. 核心查找：根据路径和请求匹配 HandlerMethod
 			HandlerMethod handlerMethod = lookupHandlerMethod(lookupPath, request);
+
+			// 4. 如果找到，创建包含实际 Bean 实例的 HandlerMethod（处理懒加载等情况）
 			return (handlerMethod != null ? handlerMethod.createWithResolvedBean() : null);
 		}
 		finally {
+			// 5. 释放读锁
 			this.mappingRegistry.releaseReadLock();
 		}
 	}
 
 	/**
-	 * Look up the best-matching handler method for the current request.
-	 * If multiple matches are found, the best match is selected.
-	 * @param lookupPath mapping lookup path within the current servlet mapping
-	 * @param request the current request
-	 * @return the best-matching handler method, or {@code null} if no match
-	 * @see #handleMatch(Object, String, HttpServletRequest)
-	 * @see #handleNoMatch(Set, String, HttpServletRequest)
+	 * 为当前请求查找最佳匹配的处理器方法。
+	 * 如果找到多个匹配，选择最佳匹配。
 	 */
 	@Nullable
 	protected HandlerMethod lookupHandlerMethod(String lookupPath, HttpServletRequest request) throws Exception {
 		List<Match> matches = new ArrayList<>();
+
+		// ========== 1. 第一轮：直接路径匹配（最快） ==========
 		List<T> directPathMatches = this.mappingRegistry.getMappingsByDirectPath(lookupPath);
 		if (directPathMatches != null) {
 			addMatchingMappings(directPathMatches, matches, request);
 		}
+
+		// ========== 2. 第二轮：模式匹配（如 /user/{id}） ==========
 		if (matches.isEmpty()) {
 			addMatchingMappings(this.mappingRegistry.getRegistrations().keySet(), matches, request);
 		}
+
+		// ========== 3. 找到匹配项后，选择最佳匹配 ==========
 		if (!matches.isEmpty()) {
 			Match bestMatch = matches.get(0);
+
+			// 3.1 多个匹配时，排序选出最佳
 			if (matches.size() > 1) {
 				Comparator<Match> comparator = new MatchComparator(getMappingComparator(request));
 				matches.sort(comparator);
 				bestMatch = matches.get(0);
-				if (logger.isTraceEnabled()) {
-					logger.trace(matches.size() + " matching mappings: " + matches);
-				}
+
+				// 3.2 处理 CORS 预检请求的歧义情况
 				if (CorsUtils.isPreFlightRequest(request)) {
 					for (Match match : matches) {
 						if (match.hasCorsConfig()) {
@@ -424,6 +445,7 @@ public abstract class AbstractHandlerMethodMapping<T> extends AbstractHandlerMap
 					}
 				}
 				else {
+					// 3.3 检查是否有歧义匹配（两个匹配优先级相同）
 					Match secondBestMatch = matches.get(1);
 					if (comparator.compare(bestMatch, secondBestMatch) == 0) {
 						Method m1 = bestMatch.getHandlerMethod().getMethod();
@@ -434,11 +456,14 @@ public abstract class AbstractHandlerMethodMapping<T> extends AbstractHandlerMap
 					}
 				}
 			}
+
+			// 3.4 记录最佳匹配并处理
 			request.setAttribute(BEST_MATCHING_HANDLER_ATTRIBUTE, bestMatch.getHandlerMethod());
 			handleMatch(bestMatch.mapping, lookupPath, request);
 			return bestMatch.getHandlerMethod();
 		}
 		else {
+			// ========== 4. 没有找到匹配 ==========
 			return handleNoMatch(this.mappingRegistry.getRegistrations().keySet(), lookupPath, request);
 		}
 	}

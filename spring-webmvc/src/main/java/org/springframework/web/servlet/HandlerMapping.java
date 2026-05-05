@@ -153,19 +153,18 @@ public interface HandlerMapping {
 	}
 
 	/**
-	 * Return a handler and any interceptors for this request. The choice may be made
-	 * on request URL, session state, or any factor the implementing class chooses.
-	 * <p>The returned HandlerExecutionChain contains a handler Object, rather than
-	 * even a tag interface, so that handlers are not constrained in any way.
-	 * For example, a HandlerAdapter could be written to allow another framework's
-	 * handler objects to be used.
-	 * <p>Returns {@code null} if no match was found. This is not an error.
-	 * The DispatcherServlet will query all registered HandlerMapping beans to find
-	 * a match, and only decide there is an error if none can find a handler.
-	 * @param request current HTTP request
-	 * @return a HandlerExecutionChain instance containing handler object and
-	 * any interceptors, or {@code null} if no mapping found
-	 * @throws Exception if there is an internal error
+	 * 返回当前请求的处理器和任何关联的拦截器。
+	 * 具体实现可以根据请求 URL、session 状态或其他因素做出选择。
+	 * <p>返回的 HandlerExecutionChain 包含一个处理器 Object（不强制实现任何特定接口），
+	 * 因此处理器不受任何约束。例如，可以编写一个 HandlerAdapter 来适配其他框架的处理器对象。
+	 * <p>如果没有找到匹配项，返回 {@code null}。这不算错误。
+	 * DispatcherServlet 会查询所有注册的 HandlerMapping Bean 来寻找匹配，
+	 * 只有当没有任何 HandlerMapping 能找到处理器时，才判定为错误。
+	 *
+	 * @param request 当前 HTTP 请求
+	 * @return 包含处理器对象和拦截器的 HandlerExecutionChain 实例，
+	 *         如果没有找到映射则返回 {@code null}
+	 * @throws Exception 如果发生内部错误
 	 */
 	@Nullable
 	HandlerExecutionChain getHandler(HttpServletRequest request) throws Exception;

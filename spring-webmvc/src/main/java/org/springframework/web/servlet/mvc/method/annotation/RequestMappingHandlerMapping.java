@@ -271,24 +271,27 @@ public class RequestMappingHandlerMapping extends RequestMappingInfoHandlerMappi
 	}
 
 	/**
-	 * Uses method and type-level @{@link RequestMapping} annotations to create
-	 * the RequestMappingInfo.
-	 * @return the created RequestMappingInfo, or {@code null} if the method
-	 * does not have a {@code @RequestMapping} annotation.
-	 * @see #getCustomMethodCondition(Method)
-	 * @see #getCustomTypeCondition(Class)
+	 * 使用方法级别和类级别的 @RequestMapping 注解创建 RequestMappingInfo。
+	 *
+	 * @return 创建的 RequestMappingInfo，如果方法没有 @RequestMapping 注解则返回 null
 	 */
 	@Override
 	@Nullable
 	protected RequestMappingInfo getMappingForMethod(Method method, Class<?> handlerType) {
+		// ========== 1. 获取方法级别的映射信息 ==========
 		RequestMappingInfo info = createRequestMappingInfo(method);
 		if (info != null) {
+			// ========== 2. 获取类级别的映射信息 ==========
 			RequestMappingInfo typeInfo = createRequestMappingInfo(handlerType);
 			if (typeInfo != null) {
+				// ========== 3. 合并：类级别 + 方法级别 ==========
 				info = typeInfo.combine(info);
 			}
+
+			// ========== 4. 获取路径前缀（如 @RequestMapping 的 path 属性） ==========
 			String prefix = getPathPrefix(handlerType);
 			if (prefix != null) {
+				// ========== 5. 合并路径前缀 ==========
 				info = RequestMappingInfo.paths(prefix).options(this.config).build().combine(info);
 			}
 		}
