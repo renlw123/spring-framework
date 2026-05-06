@@ -1281,47 +1281,84 @@ public class DispatcherServlet extends FrameworkServlet {
 	}
 
 	/**
-	 * Handle the result of handler selection and handler invocation, which is
-	 * either a ModelAndView or an Exception to be resolved to a ModelAndView.
+	 * 处理处理器选择和调用的结果。
+	 * 结果要么是 ModelAndView，要么是需要解析为 ModelAndView 的异常。
+	 *
+	 * <p>这是 DispatcherServlet 中请求处理的最后阶段，负责：
+	 * <ul>
+	 *   <li>处理处理器执行过程中抛出的异常</li>
+	 *   <li>决定是否需要渲染视图（如果 mv 不为空）</li>
+	 *   <li>执行视图渲染（将模型数据与视图模板合并输出）</li>
+	 *   <li>触发拦截器的 afterCompletion 回调</li>
+	 * </ul>
+	 *
+	 * @param request       当前 HTTP 请求对象
+	 * @param response      当前 HTTP 响应对象
+	 * @param mappedHandler 处理器执行链，包含拦截器和处理器对象
+	 * @param mv            ModelAndView 对象，可能为 null（如 @ResponseBody 场景）
+	 * @param exception     处理器执行过程中抛出的异常，可能为 null
+	 * @throws Exception 渲染过程中可能抛出的异常
 	 */
 	private void processDispatchResult(HttpServletRequest request, HttpServletResponse response,
-			@Nullable HandlerExecutionChain mappedHandler, @Nullable ModelAndView mv,
-			@Nullable Exception exception) throws Exception {
+									   @Nullable HandlerExecutionChain mappedHandler, @Nullable ModelAndView mv,
+									   @Nullable Exception exception) throws Exception {
 
-		boolean errorView = false;
+		boolean errorView = false;  // 标记当前渲染的是否是错误视图
 
+		// ==================== 1. 异常处理 ====================
+		// 如果处理器执行过程中抛出了异常
 		if (exception != null) {
+			// 特殊异常类型：ModelAndViewDefiningException 已经包含了要展示的 ModelAndView
 			if (exception instanceof ModelAndViewDefiningException) {
 				logger.debug("ModelAndViewDefiningException encountered", exception);
+				// 直接从异常中获取 ModelAndView
 				mv = ((ModelAndViewDefiningException) exception).getModelAndView();
 			}
 			else {
+				// 普通异常：通过 HandlerExceptionResolver 链处理，获取对应的错误视图
 				Object handler = (mappedHandler != null ? mappedHandler.getHandler() : null);
 				mv = processHandlerException(request, response, handler, exception);
-				errorView = (mv != null);
+				errorView = (mv != null);  // 标记这是错误视图（用于后续清理错误请求属性）
 			}
 		}
 
-		// Did the handler return a view to render?
+		// ==================== 2. 视图渲染 ====================
+		// 检查是否需要渲染视图：
+		// - mv != null：有视图需要渲染
+		// - !mv.wasCleared()：视图未被清除（某些情况下可能会清除视图，如重定向）
 		if (mv != null && !mv.wasCleared()) {
+			// 执行视图渲染：将模型数据与视图模板结合，输出到响应
 			render(mv, request, response);
+
+			// 如果渲染的是错误视图，清理请求中的错误属性
+			// （这些属性是 processHandlerException 中设置的，用于展示错误信息）
 			if (errorView) {
 				WebUtils.clearErrorRequestAttributes(request);
 			}
 		}
 		else {
+			// 没有视图需要渲染的场景：
+			// - @ResponseBody 返回 JSON/XML（mv = null）
+			// - 直接通过 HttpServletResponse 写回了响应
+			// - 异步请求（尚未完成）
 			if (logger.isTraceEnabled()) {
 				logger.trace("No view rendering, null ModelAndView returned.");
 			}
 		}
 
+		// ==================== 3. 异步请求检查 ====================
+		// 如果转发过程中开始了异步处理（如 forward 到异步处理器），则直接返回
+		// 此时请求将在异步线程中继续处理，不应在此处触发 afterCompletion
 		if (WebAsyncUtils.getAsyncManager(request).isConcurrentHandlingStarted()) {
-			// Concurrent handling started during a forward
 			return;
 		}
 
+		// ==================== 4. 触发 afterCompletion ====================
+		// 触发拦截器的 afterCompletion 回调
+		// 无论是否有异常，无论是否渲染视图，都会执行到这里
+		// 用于资源清理、日志记录等收尾工作
 		if (mappedHandler != null) {
-			// Exception (if any) is already handled..
+			// 注意：exception 参数传 null，因为异常已经处理完了
 			mappedHandler.triggerAfterCompletion(request, response, null);
 		}
 	}
