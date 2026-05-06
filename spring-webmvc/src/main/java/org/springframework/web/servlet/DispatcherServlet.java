@@ -1578,55 +1578,87 @@ public class DispatcherServlet extends FrameworkServlet {
 	}
 
 	/**
-	 * Render the given ModelAndView.
-	 * <p>This is the last stage in handling a request. It may involve resolving the view by name.
-	 * @param mv the ModelAndView to render
-	 * @param request current HTTP servlet request
-	 * @param response current HTTP servlet response
-	 * @throws ServletException if view is missing or cannot be resolved
-	 * @throws Exception if there's a problem rendering the view
+	 * 渲染给定的 ModelAndView。
+	 * <p>这是处理请求的最后阶段。可能涉及通过视图名称解析视图。
+	 *
+	 * <p>渲染流程包括：
+	 * <ul>
+	 *   <li>解析请求的区域信息（Locale）并设置到响应中</li>
+	 *   <li>根据视图名称查找 View 对象（或直接使用已有的 View 对象）</li>
+	 *   <li>设置响应状态码（如果 ModelAndView 中指定了状态码）</li>
+	 *   <li>委托 View 对象进行实际的渲染</li>
+	 * </ul>
+	 *
+	 * @param mv       需要渲染的 ModelAndView 对象，包含视图信息（视图名或 View 对象）和模型数据
+	 * @param request  当前 HTTP Servlet 请求对象
+	 * @param response 当前 HTTP Servlet 响应对象
+	 * @throws ServletException 如果视图缺失或无法解析视图名称时抛出
+	 * @throws Exception       渲染视图过程中出现问题时抛出
 	 */
 	protected void render(ModelAndView mv, HttpServletRequest request, HttpServletResponse response) throws Exception {
-		// Determine locale for request and apply it to the response.
-		Locale locale =
-				(this.localeResolver != null ? this.localeResolver.resolveLocale(request) : request.getLocale());
-		response.setLocale(locale);
 
+		// ==================== 1. 确定区域信息并设置到响应 ====================
+		// 区域信息用于国际化（i18n），决定使用哪种语言/地区格式
+		// 优先使用配置的 LocaleResolver（如 CookieLocaleResolver、SessionLocaleResolver），
+		// 如果没有配置则使用请求的默认区域
+		Locale locale = (this.localeResolver != null ?
+				this.localeResolver.resolveLocale(request) : request.getLocale());
+		response.setLocale(locale);  // 设置响应的 Content-Language 头
+
+		// ==================== 2. 获取 View 对象 ====================
 		View view;
 		String viewName = mv.getViewName();
+
 		if (viewName != null) {
-			// We need to resolve the view name.
+			// 情况1：使用视图名称
+			// 需要通过 ViewResolver 解析视图名称得到实际的 View 对象
+			// 例如："userList" → InternalResourceView 指向 /WEB-INF/views/userList.jsp
 			view = resolveViewName(viewName, mv.getModelInternal(), locale, request);
+
 			if (view == null) {
+				// 找不到对应的视图，抛出 ServletException
 				throw new ServletException("Could not resolve view with name '" + mv.getViewName() +
 						"' in servlet with name '" + getServletName() + "'");
 			}
 		}
 		else {
-			// No need to lookup: the ModelAndView object contains the actual View object.
+			// 情况2：ModelAndView 中直接包含了 View 对象
+			// 通常用于编程方式直接设置 View 实例，而不是通过视图名称解析
 			view = mv.getView();
+
 			if (view == null) {
+				// ModelAndView 既没有视图名称也没有 View 对象，非法状态
 				throw new ServletException("ModelAndView [" + mv + "] neither contains a view name nor a " +
 						"View object in servlet with name '" + getServletName() + "'");
 			}
 		}
 
-		// Delegate to the View object for rendering.
+		// ==================== 3. 渲染视图 ====================
 		if (logger.isTraceEnabled()) {
 			logger.trace("Rendering view [" + view + "] ");
 		}
+
 		try {
+			// 3.1 设置响应状态码（如果 ModelAndView 中指定了状态码）
+			// 例如：通过 ResponseStatus 注解或手动设置
 			if (mv.getStatus() != null) {
+				// 将状态码作为请求属性存储，供视图使用（某些视图可能需要知道状态码）
 				request.setAttribute(View.RESPONSE_STATUS_ATTRIBUTE, mv.getStatus());
-				response.setStatus(mv.getStatus().value());
+				response.setStatus(mv.getStatus().value());  // 设置 HTTP 响应状态码
 			}
+
+			// 3.2 委托 View 对象进行实际渲染
+			// 渲染的核心工作：
+			// - 将模型数据（Model）暴露为请求属性（Request attributes）
+			// - 转发到目标页面（JSP、Thymeleaf 模板等）
+			// - 或直接写入响应内容
 			view.render(mv.getModelInternal(), request, response);
 		}
 		catch (Exception ex) {
 			if (logger.isDebugEnabled()) {
 				logger.debug("Error rendering view [" + view + "]", ex);
 			}
-			throw ex;
+			throw ex;  // 重新抛出异常，让上层处理
 		}
 	}
 
@@ -1642,31 +1674,51 @@ public class DispatcherServlet extends FrameworkServlet {
 	}
 
 	/**
-	 * Resolve the given view name into a View object (to be rendered).
-	 * <p>The default implementations asks all ViewResolvers of this dispatcher.
-	 * Can be overridden for custom resolution strategies, potentially based on
-	 * specific model attributes or request parameters.
-	 * @param viewName the name of the view to resolve
-	 * @param model the model to be passed to the view
-	 * @param locale the current locale
-	 * @param request current HTTP servlet request
-	 * @return the View object, or {@code null} if none found
-	 * @throws Exception if the view cannot be resolved
-	 * (typically in case of problems creating an actual View object)
+	 * 将给定的视图名称解析为 View 对象（用于渲染）。
+	 *
+	 * <p>默认实现会询问此 DispatcherServlet 中配置的所有 ViewResolver。
+	 * 可以根据特定的模型属性或请求参数，重写此方法以实现自定义的解析策略。
+	 *
+	 * <p>典型的 ViewResolver 包括：
+	 * <ul>
+	 *   <li>InternalResourceViewResolver - 解析 JSP 视图</li>
+	 *   <li>ThymeleafViewResolver - 解析 Thymeleaf 模板</li>
+	 *   <li>FreeMarkerViewResolver - 解析 FreeMarker 模板</li>
+	 *   <li>BeanNameViewResolver - 根据 Spring Bean 名称解析视图</li>
+	 *   <li>ContentNegotiatingViewResolver - 根据请求内容类型选择视图</li>
+	 * </ul>
+	 *
+	 * @param viewName 需要解析的视图名称（例如 "userList", "admin/dashboard"）
+	 * @param model    将要传递给视图的模型数据（某些视图解析器可能需要根据模型内容来决定使用哪个视图）
+	 * @param locale   当前的区域信息（用于国际化视图，如 i18n 资源文件）
+	 * @param request  当前 HTTP Servlet 请求对象（某些解析器可能需要根据请求参数来决定）
+	 * @return 解析得到的 View 对象，如果找不到任何匹配的视图则返回 {@code null}
+	 * @throws Exception 如果无法解析视图时抛出异常（通常是在创建实际 View 对象时出现问题）
 	 * @see ViewResolver#resolveViewName
 	 */
 	@Nullable
 	protected View resolveViewName(String viewName, @Nullable Map<String, Object> model,
-			Locale locale, HttpServletRequest request) throws Exception {
+								   Locale locale, HttpServletRequest request) throws Exception {
 
+		// ==================== 1. 检查是否有配置 ViewResolver ====================
 		if (this.viewResolvers != null) {
+
+			// ==================== 2. 遍历所有 ViewResolver ====================
+			// 按照配置的顺序依次尝试解析
+			// 一旦某个 ViewResolver 成功解析到 View 对象，立即返回
 			for (ViewResolver viewResolver : this.viewResolvers) {
+				// 调用 ViewResolver 的 resolveViewName 方法
+				// 每个 ViewResolver 根据自己的逻辑判断是否能处理这个视图名称
 				View view = viewResolver.resolveViewName(viewName, locale);
+
 				if (view != null) {
-					return view;
+					return view;  // 找到第一个可用的 View，立即返回
 				}
 			}
 		}
+
+		// ==================== 3. 没有找到任何 View ====================
+		// 返回 null，上层会抛出 "Could not resolve view" 异常
 		return null;
 	}
 

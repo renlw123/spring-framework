@@ -296,23 +296,47 @@ public abstract class AbstractView extends WebApplicationObjectSupport implement
 
 
 	/**
-	 * Prepares the view given the specified model, merging it with static
-	 * attributes and a RequestContext attribute, if necessary.
-	 * Delegates to renderMergedOutputModel for the actual rendering.
+	 * 准备要渲染的视图，将指定模型与静态属性以及 RequestContext 属性（如果需要）合并。
+	 * 委托给 renderMergedOutputModel 方法进行实际的渲染。
+	 *
+	 * <p>这是 AbstractView 中视图渲染的模板方法，定义了渲染的标准流程：
+	 * <ol>
+	 *   <li>创建合并后的输出模型（将动态模型与静态属性合并）</li>
+	 *   <li>准备响应（设置响应头、内容类型、字符编码等）</li>
+	 *   <li>渲染合并后的输出模型（具体的视图实现负责实现此逻辑）</li>
+	 * </ol>
+	 *
+	 * @param model    控制器方法提供的动态模型数据（可能为 null）
+	 * @param request  当前 HTTP 请求对象
+	 * @param response 当前 HTTP 响应对象
+	 * @throws Exception 渲染过程中可能抛出的异常
 	 * @see #renderMergedOutputModel
 	 */
 	@Override
 	public void render(@Nullable Map<String, ?> model, HttpServletRequest request,
-			HttpServletResponse response) throws Exception {
+					   HttpServletResponse response) throws Exception {
 
+		// ==================== 1. 调试日志 ====================
 		if (logger.isDebugEnabled()) {
 			logger.debug("View " + formatViewName() +
 					", model " + (model != null ? model : Collections.emptyMap()) +
 					(this.staticAttributes.isEmpty() ? "" : ", static attributes " + this.staticAttributes));
 		}
 
+		// ==================== 2. 创建合并后的输出模型 ====================
+		// 将动态模型（控制器传入）与静态属性（视图配置的固定属性）合并
+		// 静态属性优先级更高，会覆盖同名的动态模型属性
 		Map<String, Object> mergedModel = createMergedOutputModel(model, request, response);
+
+		// ==================== 3. 准备响应 ====================
+		// 设置响应头：Content-Type、字符编码、缓存控制等
 		prepareResponse(request, response);
+
+		// ==================== 4. 执行实际渲染 ====================
+		// 由子类实现具体的渲染逻辑
+		// - InternalResourceView：转发到 JSP
+		// - ThymeleafView：渲染 Thymeleaf 模板
+		// - RedirectView：执行重定向
 		renderMergedOutputModel(mergedModel, getRequestToExpose(request), response);
 	}
 
