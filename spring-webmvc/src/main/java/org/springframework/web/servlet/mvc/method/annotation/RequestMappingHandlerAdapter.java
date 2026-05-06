@@ -1080,26 +1080,68 @@ public class RequestMappingHandlerAdapter extends AbstractHandlerMethodAdapter
 		return new ServletRequestDataBinderFactory(binderMethods, getWebBindingInitializer());
 	}
 
+	/**
+	 * 从 ModelAndViewContainer 中构建 ModelAndView 对象。
+	 *
+	 * <p>此方法在控制器方法执行完成后调用，负责：
+	 * <ul>
+	 *   <li>更新模型中带有 @SessionAttributes 注解的属性到会话中</li>
+	 *   <li>检查请求是否已被完全处理（如已直接写回响应）</li>
+	 *   <li>创建 ModelAndView 对象，设置视图名称/视图对象和模型数据</li>
+	 *   <li>处理重定向时的 Flash 属性（用于跨重定向传递临时数据）</li>
+	 * </ul>
+	 *
+	 * @param mavContainer  ModelAndView 容器，包含视图信息和模型数据
+	 * @param modelFactory  模型工厂，负责更新会话属性
+	 * @param webRequest    当前请求对象，封装了 HttpServletRequest 和 HttpServletResponse
+	 * @return 构建好的 ModelAndView 对象，如果请求已被直接处理则返回 {@code null}
+	 * @throws Exception 更新模型时可能抛出的异常
+	 */
 	@Nullable
 	private ModelAndView getModelAndView(ModelAndViewContainer mavContainer,
-			ModelFactory modelFactory, NativeWebRequest webRequest) throws Exception {
+										 ModelFactory modelFactory, NativeWebRequest webRequest) throws Exception {
 
+		// ==================== 1. 更新模型中的会话属性 ====================
+		// 将模型中带有 @SessionAttributes 注解的属性同步到 HttpSession 中
+		// 这样在同一个会话的后续请求中可以通过 @SessionAttribute 获取到
 		modelFactory.updateModel(webRequest, mavContainer);
+
+		// ==================== 2. 检查请求是否已被完全处理 ====================
+		// 如果请求已经被处理（例如通过 @ResponseBody 直接写入了响应体，
+		// 或者通过 HttpServletResponse 直接返回了内容），则不需要再创建 ModelAndView
 		if (mavContainer.isRequestHandled()) {
 			return null;
 		}
+
+		// ==================== 3. 获取模型数据 ====================
 		ModelMap model = mavContainer.getModel();
+
+		// ==================== 4. 创建 ModelAndView 对象 ====================
+		// 根据视图名称、模型数据和响应状态创建 ModelAndView
 		ModelAndView mav = new ModelAndView(mavContainer.getViewName(), model, mavContainer.getStatus());
+
+		// ==================== 5. 设置视图对象（如果不是视图名称） ====================
+		// 如果容器中存储的是 View 对象而非视图名称，则直接设置 View 对象
+		// 例如：通过 ViewResolver 解析后缓存的 View 实例
 		if (!mavContainer.isViewReference()) {
 			mav.setView((View) mavContainer.getView());
 		}
+
+		// ==================== 6. 处理重定向时的 Flash 属性 ====================
+		// 如果模型是 RedirectAttributes 类型，说明是重定向场景
+		// 需要将 Flash 属性提取出来，放入输出 FlashMap 中，
+		// 以便在重定向后的请求中能够获取到这些临时数据
 		if (model instanceof RedirectAttributes) {
+			// 获取 Flash 属性（这些属性只会在本次重定向后的下一次请求中有效）
 			Map<String, ?> flashAttributes = ((RedirectAttributes) model).getFlashAttributes();
 			HttpServletRequest request = webRequest.getNativeRequest(HttpServletRequest.class);
 			if (request != null) {
+				// 将 Flash 属性放入输出 FlashMap，由 FlashMapManager 管理
+				// 重定向后，这些属性会被合并到下一个请求的输入 FlashMap 中
 				RequestContextUtils.getOutputFlashMap(request).putAll(flashAttributes);
 			}
 		}
+
 		return mav;
 	}
 
