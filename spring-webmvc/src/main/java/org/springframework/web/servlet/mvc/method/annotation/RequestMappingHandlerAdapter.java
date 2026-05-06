@@ -788,37 +788,62 @@ public class RequestMappingHandlerAdapter extends AbstractHandlerMethodAdapter
 		return true;  // 无条件支持所有 HandlerMethod
 	}
 
+	/**
+	 * 处理请求的内部方法，由 handle() 方法调用。
+	 *
+	 * 主要执行流程：
+	 * 1. 检查请求的有效性
+	 * 2. 根据是否需要会话同步，选择同步或非同步方式调用处理器方法
+	 * 3. 根据会话属性情况设置缓存策略
+	 *
+	 * @param request       当前 HTTP 请求对象
+	 * @param response      当前 HTTP 响应对象
+	 * @param handlerMethod 封装了控制器方法的 HandlerMethod 对象
+	 * @return ModelAndView 对象，如果请求已被直接处理则返回 null
+	 * @throws Exception 处理过程中可能抛出的异常
+	 */
 	@Override
 	protected ModelAndView handleInternal(HttpServletRequest request,
-			HttpServletResponse response, HandlerMethod handlerMethod) throws Exception {
+										  HttpServletResponse response, HandlerMethod handlerMethod) throws Exception {
 
 		ModelAndView mav;
+
+		// 1. 检查请求：例如验证请求方法（GET/POST等）是否被允许
 		checkRequest(request);
 
-		// Execute invokeHandlerMethod in synchronized block if required.
+		// 2. 根据是否需要在会话上同步，选择执行方式
+		// synchronizeOnSession 用于解决 Session 属性的并发问题（如并发修改）
 		if (this.synchronizeOnSession) {
+			// 需要会话同步：获取当前会话的锁，确保同一会话的请求串行处理
 			HttpSession session = request.getSession(false);
 			if (session != null) {
+				// 存在会话：获取该会话对应的互斥锁对象
+				// WebUtils.getSessionMutex(session) 默认返回 session 对象本身
 				Object mutex = WebUtils.getSessionMutex(session);
 				synchronized (mutex) {
+					// 在同步块内调用处理器方法，保证同一会话的请求顺序执行
 					mav = invokeHandlerMethod(request, response, handlerMethod);
 				}
 			}
 			else {
-				// No HttpSession available -> no mutex necessary
+				// 不存在会话：无需同步，直接调用
 				mav = invokeHandlerMethod(request, response, handlerMethod);
 			}
 		}
 		else {
-			// No synchronization on session demanded at all...
+			// 不需要会话同步：直接调用处理器方法
 			mav = invokeHandlerMethod(request, response, handlerMethod);
 		}
 
+		// 3. 设置缓存控制头（仅当响应中尚未设置 Cache-Control 时）
 		if (!response.containsHeader(HEADER_CACHE_CONTROL)) {
+			// 检查处理器方法是否声明了会话属性（使用 @SessionAttributes 注解）
 			if (getSessionAttributesHandler(handlerMethod).hasSessionAttributes()) {
+				// 存在会话属性：使用专门配置的缓存时间（通常较短或不允许缓存）
 				applyCacheSeconds(response, this.cacheSecondsForSessionAttributeHandlers);
 			}
 			else {
+				// 不存在会话属性：使用默认的缓存策略
 				prepareResponse(response);
 			}
 		}
@@ -849,70 +874,115 @@ public class RequestMappingHandlerAdapter extends AbstractHandlerMethodAdapter
 	}
 
 	/**
-	 * Invoke the {@link RequestMapping} handler method preparing a {@link ModelAndView}
-	 * if view resolution is required.
+	 * 调用 @RequestMapping 标记的处理器方法，并在需要视图解析时准备 ModelAndView。
+	 *
+	 * 这是 Spring MVC 请求处理的核心方法，主要职责：
+	 * 1. 配置异步请求处理支持
+	 * 2. 创建参数解析器、返回值处理器、数据绑定工厂等
+	 * 3. 初始化模型数据（包括 @ModelAttribute 方法和 @SessionAttributes）
+	 * 4. 调用实际的控制器方法并处理返回值
+	 * 5. 构建并返回 ModelAndView 对象
+	 *
 	 * @since 4.2
+	 * @param request       当前 HTTP 请求对象
+	 * @param response      当前 HTTP 响应对象
+	 * @param handlerMethod 封装了控制器方法的 HandlerMethod
+	 * @return ModelAndView 对象，如果请求已被直接处理（如异步请求或直接返回响应）则返回 null
+	 * @throws Exception 处理过程中可能抛出的异常
 	 * @see #createInvocableHandlerMethod(HandlerMethod)
 	 */
 	@Nullable
 	protected ModelAndView invokeHandlerMethod(HttpServletRequest request,
-			HttpServletResponse response, HandlerMethod handlerMethod) throws Exception {
+											   HttpServletResponse response, HandlerMethod handlerMethod) throws Exception {
 
+		// ==================== 1. 配置异步请求支持 ====================
 		WebAsyncManager asyncManager = WebAsyncUtils.getAsyncManager(request);
 		AsyncWebRequest asyncWebRequest = WebAsyncUtils.createAsyncWebRequest(request, response);
-		asyncWebRequest.setTimeout(this.asyncRequestTimeout);
+		asyncWebRequest.setTimeout(this.asyncRequestTimeout);          // 设置异步超时时间
 
-		asyncManager.setTaskExecutor(this.taskExecutor);
-		asyncManager.setAsyncWebRequest(asyncWebRequest);
-		asyncManager.registerCallableInterceptors(this.callableInterceptors);
-		asyncManager.registerDeferredResultInterceptors(this.deferredResultInterceptors);
+		asyncManager.setTaskExecutor(this.taskExecutor);               // 设置异步任务执行器
+		asyncManager.setAsyncWebRequest(asyncWebRequest);              // 设置异步请求对象
+		asyncManager.registerCallableInterceptors(this.callableInterceptors);      // 注册 Callable 拦截器
+		asyncManager.registerDeferredResultInterceptors(this.deferredResultInterceptors); // 注册 DeferredResult 拦截器
 
-		// Obtain wrapped response to enforce lifecycle rule from Servlet spec, section 2.3.3.4
+		// 获取原始的 HttpServletResponse 包装对象（遵循 Servlet 规范 2.3.3.4 节的生命周期规则）
 		response = asyncWebRequest.getNativeResponse(HttpServletResponse.class);
 
+		// 创建 ServletWebRequest 对象，封装请求和响应
 		ServletWebRequest webRequest = (asyncWebRequest instanceof ServletWebRequest ?
 				(ServletWebRequest) asyncWebRequest : new ServletWebRequest(request, response));
 
+		// ==================== 2. 准备工作：参数解析器、返回值处理器等 ====================
 		try {
+			// 获取 WebDataBinderFactory，用于创建数据绑定器（将请求参数绑定到方法参数）
 			WebDataBinderFactory binderFactory = getDataBinderFactory(handlerMethod);
+
+			// 获取 ModelFactory，负责初始化模型数据（处理 @ModelAttribute 和 @SessionAttributes）
 			ModelFactory modelFactory = getModelFactory(handlerMethod, binderFactory);
 
+			// 创建可调用的处理器方法包装器（支持参数解析和返回值处理）
 			ServletInvocableHandlerMethod invocableMethod = createInvocableHandlerMethod(handlerMethod);
+
+			// 设置参数解析器（如 @RequestParam、@PathVariable、@RequestBody 等的解析器）
 			if (this.argumentResolvers != null) {
 				invocableMethod.setHandlerMethodArgumentResolvers(this.argumentResolvers);
 			}
+
+			// 设置返回值处理器（如 @ResponseBody、ModelAndView、String 等的处理器）
 			if (this.returnValueHandlers != null) {
 				invocableMethod.setHandlerMethodReturnValueHandlers(this.returnValueHandlers);
 			}
-			invocableMethod.setDataBinderFactory(binderFactory);
-			invocableMethod.setParameterNameDiscoverer(this.parameterNameDiscoverer);
 
+			invocableMethod.setDataBinderFactory(binderFactory);
+			invocableMethod.setParameterNameDiscoverer(this.parameterNameDiscoverer);  // 参数名称发现器
+
+			// ==================== 3. 创建并初始化 ModelAndView 容器 ====================
 			ModelAndViewContainer mavContainer = new ModelAndViewContainer();
+
+			// 添加输入 Flash 属性（用于重定向时传递临时属性）
 			mavContainer.addAllAttributes(RequestContextUtils.getInputFlashMap(request));
+
+			// 初始化模型：调用所有 @ModelAttribute 方法，设置 @SessionAttributes 属性
 			modelFactory.initModel(webRequest, mavContainer, invocableMethod);
+
+			// 设置是否忽略重定向时的默认模型属性
 			mavContainer.setIgnoreDefaultModelOnRedirect(this.ignoreDefaultModelOnRedirect);
 
+			// ==================== 4. 处理异步请求的恢复（第二次请求，有并发结果） ====================
 			if (asyncManager.hasConcurrentResult()) {
+				// 获取异步处理的结果
 				Object result = asyncManager.getConcurrentResult();
 				Object[] resultContext = asyncManager.getConcurrentResultContext();
 				Assert.state(resultContext != null && resultContext.length > 0, "Missing result context");
+
+				// 恢复之前的 ModelAndViewContainer
 				mavContainer = (ModelAndViewContainer) resultContext[0];
 				asyncManager.clearConcurrentResult();
+
+				// 记录调试日志
 				LogFormatUtils.traceDebug(logger, traceOn -> {
 					String formatted = LogFormatUtils.formatValue(result, !traceOn);
 					return "Resume with async result [" + formatted + "]";
 				});
+
+				// 包装带有并发结果的方法
 				invocableMethod = invocableMethod.wrapConcurrentResult(result);
 			}
 
+			// ==================== 5. 调用处理器方法并处理返回值 ====================
 			invocableMethod.invokeAndHandle(webRequest, mavContainer);
+
+			// 如果异步处理已启动（方法返回 Callable/DeferredResult 等），直接返回 null
+			// 后续响应由异步线程完成
 			if (asyncManager.isConcurrentHandlingStarted()) {
 				return null;
 			}
 
+			// ==================== 6. 构建并返回 ModelAndView ====================
 			return getModelAndView(mavContainer, modelFactory, webRequest);
 		}
 		finally {
+			// 请求完成通知（释放资源、触发拦截器的 afterCompletion 等）
 			webRequest.requestCompleted();
 		}
 	}

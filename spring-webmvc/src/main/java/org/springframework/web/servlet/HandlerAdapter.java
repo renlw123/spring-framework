@@ -63,20 +63,20 @@ public interface HandlerAdapter {
 	boolean supports(Object handler);
 
 	/**
-	 * Use the given handler to handle this request.
-	 * The workflow that is required may vary widely.
-	 * @param request current HTTP request
-	 * @param response current HTTP response
-	 * @param handler the handler to use. This object must have previously been passed
-	 * to the {@code supports} method of this interface, which must have
-	 * returned {@code true}.
-	 * @return a ModelAndView object with the name of the view and the required
-	 * model data, or {@code null} if the request has been handled directly
-	 * @throws Exception in case of errors
+	 * 使用给定的处理器来处理当前请求。
+	 * 所需的工作流程可能因不同的处理器类型而有很大差异。
+	 *
+	 * @param request  当前 HTTP 请求对象，包含请求方法、参数、头部等信息
+	 * @param response 当前 HTTP 响应对象，用于设置响应状态、头部和写入响应内容
+	 * @param handler  要使用的处理器对象。该对象之前必须已经传递给当前接口的
+	 *                 {@code supports} 方法，并且该方法必须返回了 {@code true}，
+	 *                 表示当前适配器支持该处理器
+	 * @return 一个 ModelAndView 对象，包含视图名称和所需的模型数据；
+	 *         如果请求已经被直接处理（例如直接写回了响应，无需视图解析），则返回 {@code null}
+	 * @throws Exception 处理过程中可能发生的任何异常，如业务异常、数据访问异常等
 	 */
 	@Nullable
 	ModelAndView handle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception;
-
 	/**
 	 * Same contract as for HttpServlet's {@code getLastModified} method.
 	 * Can simply return -1 if there's no support in the handler class.

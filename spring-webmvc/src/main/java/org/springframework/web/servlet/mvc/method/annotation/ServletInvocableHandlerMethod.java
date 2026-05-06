@@ -105,33 +105,61 @@ public class ServletInvocableHandlerMethod extends InvocableHandlerMethod {
 
 
 	/**
-	 * Invoke the method and handle the return value through one of the
-	 * configured {@link HandlerMethodReturnValueHandler HandlerMethodReturnValueHandlers}.
-	 * @param webRequest the current request
-	 * @param mavContainer the ModelAndViewContainer for this request
-	 * @param providedArgs "given" arguments matched by type (not resolved)
+	 * 调用处理器方法，并通过配置的返回值处理器之一来处理返回值。
+	 *
+	 * 这是请求处理的核心方法，负责：
+	 * 1. 调用控制器方法获取返回值
+	 * 2. 设置响应状态（@ResponseStatus 注解）
+	 * 3. 根据返回值类型和状态，决定是否需要视图渲染
+	 * 4. 委托给合适的 HandlerMethodReturnValueHandler 处理返回值
+	 *
+	 * @param webRequest   当前请求对象，封装了 HttpServletRequest 和 HttpServletResponse
+	 * @param mavContainer 当前请求的 ModelAndView 容器，用于存储模型和视图信息
+	 * @param providedArgs "已提供的"参数，按类型匹配（不通过参数解析器解析）
+	 * @throws Exception 调用方法或处理返回值时可能抛出的异常
 	 */
 	public void invokeAndHandle(ServletWebRequest webRequest, ModelAndViewContainer mavContainer,
-			Object... providedArgs) throws Exception {
+								Object... providedArgs) throws Exception {
 
+		// ==================== 1. 调用控制器方法，获取返回值 ====================
+		// 通过参数解析器解析方法参数，然后反射调用控制器方法
 		Object returnValue = invokeForRequest(webRequest, mavContainer, providedArgs);
+
+		// ==================== 2. 设置响应状态 ====================
+		// 处理 @ResponseStatus 注解，设置 HTTP 状态码和原因短语
 		setResponseStatus(webRequest);
 
+		// ==================== 3. 处理空返回值的情况 ====================
 		if (returnValue == null) {
+			// 以下三种情况表示请求已经完全处理，无需进一步操作：
+			// 条件1: 请求未修改（if-not-modified 头导致返回 304 状态码）
+			// 条件2: 已通过 @ResponseStatus 设置了响应状态码
+			// 条件3: 容器已标记请求已被处理（如直接在拦截器中写回响应）
 			if (isRequestNotModified(webRequest) || getResponseStatus() != null || mavContainer.isRequestHandled()) {
+				// 如果必要，禁用响应内容缓存（例如对于 304 响应，不应有响应体）
 				disableContentCachingIfNecessary(webRequest);
+				// 标记请求已处理，后续不再进行视图渲染
 				mavContainer.setRequestHandled(true);
 				return;
 			}
 		}
+		// ==================== 4. 处理有返回值但设置了响应状态原因的情况 ====================
 		else if (StringUtils.hasText(getResponseStatusReason())) {
+			// 如果通过 @ResponseStatus 设置了状态原因（reason），返回值将被忽略
+			// 标记请求已处理，不进行视图渲染
 			mavContainer.setRequestHandled(true);
 			return;
 		}
 
+		// ==================== 5. 正常情况：使用返回值处理器处理返回值 ====================
+		// 标记请求尚未完全处理（可能需要进行视图渲染）
 		mavContainer.setRequestHandled(false);
+
 		Assert.state(this.returnValueHandlers != null, "No return value handlers");
+
 		try {
+			// 遍历所有配置的 HandlerMethodReturnValueHandler
+			// 找到支持该返回值类型的处理器，并调用其 handleReturnValue 方法
 			this.returnValueHandlers.handleReturnValue(
 					returnValue, getReturnValueType(returnValue), mavContainer, webRequest);
 		}

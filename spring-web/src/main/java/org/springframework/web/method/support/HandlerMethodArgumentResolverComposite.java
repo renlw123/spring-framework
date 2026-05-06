@@ -95,11 +95,17 @@ public class HandlerMethodArgumentResolverComposite implements HandlerMethodArgu
 
 
 	/**
-	 * Whether the given {@linkplain MethodParameter method parameter} is
-	 * supported by any registered {@link HandlerMethodArgumentResolver}.
+	 * 判断给定的方法参数是否被任何已注册的 {@link HandlerMethodArgumentResolver} 所支持。
+	 *
+	 * <p>这是一个快速检查方法，通过查找匹配的参数解析器来判断参数是否可解析。
+	 * 通常在使用 {@link #resolveArgument} 之前调用此方法进行预检。
+	 *
+	 * @param parameter 需要检查的方法参数，包含参数类型、注解、泛型等信息
+	 * @return 如果存在至少一个支持该参数的参数解析器则返回 {@code true}，否则返回 {@code false}
 	 */
 	@Override
 	public boolean supportsParameter(MethodParameter parameter) {
+		// 根据参数查找对应的解析器，如果找到则返回 true，否则返回 false
 		return getArgumentResolver(parameter) != null;
 	}
 
@@ -123,21 +129,42 @@ public class HandlerMethodArgumentResolverComposite implements HandlerMethodArgu
 	}
 
 	/**
-	 * Find a registered {@link HandlerMethodArgumentResolver} that supports
-	 * the given method parameter.
+	 * 查找一个已注册的、支持给定方法参数的 {@link HandlerMethodArgumentResolver}。
+	 *
+	 * <p>此方法首先尝试从缓存中获取参数对应的解析器，如果缓存中不存在，
+	 * 则遍历所有已注册的参数解析器，找到第一个支持该参数的解析器，
+	 * 并将其放入缓存中以供后续使用。
+	 *
+	 * <p>这种缓存机制可以显著提升性能，避免对同一参数类型的重复查找，
+	 * 因为方法参数的定义在运行时是固定的。
+	 *
+	 * @param parameter 需要查找解析器的方法参数，包含参数类型、注解、泛型等信息
+	 * @return 支持该参数的参数解析器，如果没有找到任何支持的解析器则返回 {@code null}
 	 */
 	@Nullable
 	private HandlerMethodArgumentResolver getArgumentResolver(MethodParameter parameter) {
+		// ==================== 1. 从缓存中查找 ====================
+		// 首先尝试从缓存中获取该参数对应的解析器
+		// argumentResolverCache 是 ConcurrentHashMap，线程安全
 		HandlerMethodArgumentResolver result = this.argumentResolverCache.get(parameter);
+
 		if (result == null) {
+			// ==================== 2. 缓存未命中，遍历所有解析器 ====================
+			// 遍历所有已注册的参数解析器（按注册顺序）
 			for (HandlerMethodArgumentResolver resolver : this.argumentResolvers) {
+				// 检查当前解析器是否支持该参数
 				if (resolver.supportsParameter(parameter)) {
+					// 找到第一个支持的解析器
 					result = resolver;
+					// ==================== 3. 存入缓存 ====================
+					// 将解析器缓存起来，下次遇到相同的 MethodParameter 时可直接使用
+					// 注意：MethodParameter 实现了 equals/hashCode，基于方法、参数索引等
 					this.argumentResolverCache.put(parameter, result);
-					break;
+					break;  // 找到后立即退出循环
 				}
 			}
 		}
+
 		return result;
 	}
 

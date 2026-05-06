@@ -33,11 +33,22 @@ import org.springframework.web.context.request.NativeWebRequest;
 public interface HandlerMethodArgumentResolver {
 
 	/**
-	 * Whether the given {@linkplain MethodParameter method parameter} is
-	 * supported by this resolver.
-	 * @param parameter the method parameter to check
-	 * @return {@code true} if this resolver supports the supplied parameter;
-	 * {@code false} otherwise
+	 * 判断给定的方法参数是否被此解析器支持。
+	 *
+	 * <p>每个参数解析器都需要实现此方法，根据自身的能力范围来判断
+	 * 是否可以处理当前传入的方法参数。解析器通常基于以下条件进行判断：
+	 * <ul>
+	 *   <li>参数上是否有特定的注解（如 @RequestParam、@PathVariable）</li>
+	 *   <li>参数的类型（如 HttpServletRequest、Model、Map）</li>
+	 *   <li>参数的泛型信息（如 List<User>、Optional<Long>）</li>
+	 *   <li>参数的其他元数据（如是否可选、是否必需）</li>
+	 * </ul>
+	 *
+	 * <p>Spring MVC 会遍历所有已注册的参数解析器，调用此方法逐个检查，
+	 * 找到第一个返回 {@code true} 的解析器来处理该参数。
+	 *
+	 * @param parameter 需要检查的方法参数，包含参数类型、注解、泛型等信息
+	 * @return 如果此解析器支持该参数则返回 {@code true}，否则返回 {@code false}
 	 */
 	boolean supportsParameter(MethodParameter parameter);
 

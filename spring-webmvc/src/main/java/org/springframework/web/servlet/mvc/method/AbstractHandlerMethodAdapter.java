@@ -87,13 +87,26 @@ public abstract class AbstractHandlerMethodAdapter extends WebContentGenerator i
 	protected abstract boolean supportsInternal(HandlerMethod handlerMethod);
 
 	/**
-	 * This implementation expects the handler to be an {@link HandlerMethod}.
+	 * 此实现要求处理器必须是一个 {@link HandlerMethod} 对象。
+	 *
+	 * HandlerMethod 封装了控制器中处理请求的具体方法，包括：
+	 * - 方法本身（Method 对象）
+	 * - 所属的 Bean 实例
+	 * - 方法参数、返回值等信息
+	 *
+	 * @param request  当前 HTTP 请求对象
+	 * @param response 当前 HTTP 响应对象
+	 * @param handler  处理器对象，在此实现中必须是 HandlerMethod 类型
+	 * @return ModelAndView 对象，如果请求已被直接处理则返回 null
+	 * @throws Exception 处理过程中可能抛出的异常
 	 */
 	@Override
 	@Nullable
 	public final ModelAndView handle(HttpServletRequest request, HttpServletResponse response, Object handler)
 			throws Exception {
 
+		// 将 handler 强制转换为 HandlerMethod 类型，然后调用内部处理方法
+		// handleInternal 是抽象方法，由具体的子类（如 RequestMappingHandlerAdapter）实现
 		return handleInternal(request, response, (HandlerMethod) handler);
 	}
 
